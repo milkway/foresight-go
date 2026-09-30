@@ -338,14 +338,14 @@ seasonal_naive         MAPE 11.45%</code></pre>
   <section id="install" class="alt">
     <div class="wrap">
       <h2>Install &amp; run</h2>
-      <p class="sub">Get the module, describe the series, run the backtest. Go 1.22 or later.</p>
+      <p class="sub">Get the module, describe the series, run the backtest. Go 1.22 or later; changes between versions in the <a href="https://github.com/milkway/foresight-go/blob/main/CHANGELOG.md">changelog</a>.</p>
       <div class="panel" style="margin-bottom:18px">
 <pre><code><span class="c-prompt">$</span> <span class="c-cmd">go</span> get github.com/milkway/foresight-go</code></pre>
       </div>
       <div class="grid f2">
         <div>
           <div class="panel">
-<pre><code><span class="c-cmt">// choose among every built-in model</span>
+<pre><code><span class="c-cmt">// choose among the ready set of candidates</span>
 <span class="c-kw">import</span> foresight <span class="c-str">"github.com/milkway/foresight-go"</span>
 
 y := foresight.<span class="c-cmd">Monthly</span>(values, <span class="c-flag">0</span>)

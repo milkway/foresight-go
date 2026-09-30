@@ -36,7 +36,7 @@ import foresight "github.com/milkway/foresight-go"
 // monthly data whose first observation is in March
 y := foresight.Monthly(values, 2)
 
-// replay the last 36 months, 12 months ahead, with every built-in model
+// replay the last 36 months, 12 months ahead, with the 11 default models
 report, err := foresight.DefaultBacktest().Run(y, foresight.Defaults())
 if err != nil {
 	log.Fatal(err)
