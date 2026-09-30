@@ -24,6 +24,9 @@
 //	fit, err := foresight.Theta{}.Fit(foresight.NonSeasonal(values))
 //	next := fit.Forecast(3)
 //
+// Besides the models there are decompositions ([Stl], [Mstl]), combinations
+// of models ([Ensemble]) and the cleaning of gaps and outliers ([Clean]).
+//
 // This is the Go edition of the Rust crate of the same name
 // (https://crates.io/crates/foresight). The two are checked against each
 // other and against the R packages forecast and prophet on public data.

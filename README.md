@@ -84,15 +84,16 @@ A model of your own joins the backtest by implementing `Model`.
 |---|---|
 | `Series` | values + seasonal period; slices keep season and position |
 | `Model` / `Fitted` | fit once, forecast any horizon, inspect parameters |
-| Models | `Mean`, `Naive`, `Drift`, `SeasonalNaive`, `Theta`, `HoltWinters`, `LogLinear` (optionally deflated by a price index), `Arima` (seasonal, exact maximum likelihood, optionally with regressors), `AutoArima` (differences by tests, orders by stepwise search), `Ets` (the exponential smoothing family in state space form), `AutoEts`, `Prophet` (trend with changepoints, Fourier seasonality, dated events and steps) |
+| Models | `Mean`, `Naive`, `Drift`, `SeasonalNaive`, `Theta`, `HoltWinters`, `LogLinear` (optionally deflated by a price index), `Arima` (seasonal, exact maximum likelihood, optionally with regressors), `AutoArima` (differences by tests, orders by stepwise search), `Ets` (the exponential smoothing family in state space form), `AutoEts`, `Prophet` (trend with changepoints, Fourier seasonality, dated events and steps), `Tbats` (several seasonal periods, not necessarily whole numbers), `Croston` (intermittent demand, with the SBA and TSB variants) |
+| `Stl`, `Mstl`, `Decomposed` | trend, seasonal patterns and remainder by LOESS, for one or several periods; any model on the seasonally adjusted series |
+| `Ensemble` | several models combined: plain average, median, weights by inverse error or stacked weights |
+| `Interpolate`, `Outliers`, `Clean` | gaps filled and outliers found and replaced, with the season taken into account |
 | `Transformed` | any model on the log or another Box-Cox scale (`Log`, `WithBoxCox`, `WithGuerrero`) |
 | `Regressors` | external variables aligned with the data, `Fourier` terms, `SeasonalDummies` |
+| `Defaults`, `Thorough` | ready sets of candidates: the models that fit in a moment, and those plus the automatic choices and the ensembles |
 | `Backtest` | rolling origin (expanding or fixed window) on all cores; MAPE, MAE, RMSE, MASE and bias by horizon; average of the best models; choice by out-of-sample error |
 | Intervals | empirical quantiles of the backtest errors, by horizon and for cumulative totals |
 | Measures and tests | `MAPE`, `Bias`, `MAE`, `RMSE`, `MASE`, `Quantile`, `ACF`, `KPSS`, `NDiffs`, `NSDiffs`, `SeasonalStrength` |
-
-The Rust crate has more: TBATS, STL and MSTL, intermittent demand, data
-cleaning and ensembles.
 
 ## How it differs from the usual toolkits
 
@@ -111,10 +112,12 @@ overstates its uncertainty.
 | The Rust crate | Prophet, KPSS, strength of seasonality | the same numbers (under 10⁻⁸) |
 | The Rust crate | ARIMA, regression with ARIMA errors, ETS: likelihood | the same (under 10⁻⁶) |
 | The Rust crate | ARIMA and ETS forecasts; automatic orders and automatic ETS on three series | forecasts within the precision of the search; the same models chosen |
+| The Rust crate | STL, MSTL, forecasts by decomposition, Croston, SBA and TSB, outliers and cleaning | the same numbers (under 10⁻⁸) |
+| The Rust crate | ensembles: weights and forecasts; TBATS: structure chosen, likelihood and forecasts; backtest of 18 candidates | the same structure and the same choice; forecasts within the precision of the search |
 | R package `forecast` 9.0.2 | seasonal naive, random walk with drift | exact |
 | R package `forecast` 9.0.2 | Theta | forecasts within 0.1% |
 
-The tests are in `rust_test.go`, `models_test.go` and `r_test.go`. The Rust
+The tests are in `rust_test.go`, `models_test.go`, `more_test.go` and `r_test.go`. The Rust
 crate is in turn compared with the R packages `forecast` and `prophet`.
 
 ## Data

@@ -524,3 +524,20 @@ func Defaults() []Candidate {
 		NewCandidate(Log(Prophet{})),
 	}
 }
+
+// Thorough returns [Defaults] plus two ensembles of them, exponential
+// smoothing chosen automatically, alone and after an STL decomposition, and
+// ARIMA with automatic orders, on the original and on the log scale. The
+// choices are made again at every origin of the backtest, which takes seconds
+// rather than milliseconds.
+func Thorough() []Candidate {
+	return append(Defaults(),
+		NewCandidate(Ensemble{Members: Defaults()}),
+		NewCandidate(Ensemble{Members: Defaults(), Weighting: Stacked}),
+		NewCandidate(AutoEts{}),
+		NewCandidate(Decomposed{Model: AutoEts{}}),
+		NewCandidate(Log(Decomposed{Model: AutoEts{}})),
+		NewCandidate(AutoArima{}),
+		NewCandidate(Log(AutoArima{})),
+	)
+}

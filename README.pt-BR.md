@@ -45,7 +45,12 @@ semestre, _ := melhor.Cumulative(6)
 - Modelos: média, ingênuo, tendência, sazonal ingênuo, Theta, Holt-Winters,
   regressão log-linear (com deflator opcional), ARIMA sazonal por máxima
   verossimilhança exata (com regressores), ARIMA automático, família ETS com
-  escolha automática e Prophet (quebras de tendência, eventos e degraus).
+  escolha automática, Prophet (quebras de tendência, eventos e degraus), TBATS
+  (várias sazonalidades, de período não inteiro inclusive) e Croston, SBA e TSB
+  para demanda intermitente.
+- Decomposição STL e MSTL, e qualquer modelo sobre a série dessazonalizada.
+- Ensemble: média, mediana, pesos pelo inverso do erro ou pesos empilhados.
+- Limpeza: preenchimento de falhas e troca de valores atípicos.
 - Qualquer modelo na escala log ou Box-Cox.
 - Backtest por origem móvel em todos os núcleos, com MAPE, MAE, RMSE, MASE e
   viés por horizonte, média dos melhores modelos e escolha pelo erro fora da

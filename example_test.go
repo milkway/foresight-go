@@ -131,3 +131,59 @@ func ExampleAutoEts() {
 	// Output:
 	// ETS(MAM)
 }
+
+// Trend, seasonal pattern and what is left.
+func ExampleStl() {
+	d, err := foresight.Stl{Period: 12}.Decompose(sales())
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	strength, _ := d.SeasonalStrength(0)
+	fmt.Printf("trend %.0f to %.0f, seasonal strength %.2f\n", d.Trend[0], d.Trend[95], strength)
+	// Output:
+	// trend 99 to 149, seasonal strength 0.89
+}
+
+// Several models combined, the better ones counting more: here the three
+// that would have forecast the last year best.
+func ExampleEnsemble() {
+	model := foresight.Ensemble{Members: foresight.Defaults(), Top: 3}
+	fit, err := model.Fit(foresight.Monthly(sales(), 0))
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	for _, p := range fit.Params() {
+		fmt.Println(p.Name)
+	}
+	// Output:
+	// weight_log_linear
+	// weight_log_prophet
+	// weight_holt_winters
+}
+
+// Demand that comes now and then: the rate per period.
+func ExampleCroston() {
+	y := []float64{0, 0, 3, 0, 0, 0, 2, 0, 0, 4, 0, 0, 0, 0, 3, 0, 2, 0, 0, 0}
+	fit, err := foresight.Croston{Variant: foresight.SBA}.Fit(foresight.NonSeasonal(y))
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Printf("%.2f per period\n", fit.Forecast(1)[0])
+	// Output:
+	// 0.88 per period
+}
+
+// A value that does not belong, found and replaced.
+func ExampleOutliers() {
+	y := sales()
+	y[40] *= 3
+	found, _ := foresight.Outliers(y, 12)
+	for _, o := range found {
+		fmt.Printf("position %d: %.0f, rather %.0f\n", o.Index, o.Value, o.Replacement)
+	}
+	// Output:
+	// position 40: 364, rather 121
+}
