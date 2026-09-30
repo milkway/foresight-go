@@ -1,19 +1,33 @@
 package foresight
 
 import (
+	"cmp"
 	"math"
 	"slices"
 )
 
+// totalOrder compares two numbers in the total order of IEEE 754: −NaN, −Inf,
+// …, −0, +0, …, +Inf, NaN. Values that are not numbers end up last (first
+// with the sign bit set) instead of upsetting the sort.
+func totalOrder(a, b float64) int {
+	key := func(x float64) int64 {
+		bits := int64(math.Float64bits(x))
+		return bits ^ int64(uint64(bits>>63)>>1)
+	}
+	return cmp.Compare(key(a), key(b))
+}
+
 // Quantile returns the quantile p of v with linear interpolation (type 7,
-// the default in R). v does not need to be sorted. It reports false for an
-// empty slice.
+// the default in R); p under 0 is read as 0 and over 1 as 1. v does not need
+// to be sorted; values that are not numbers are sorted after all the others,
+// so the quantiles that reach them are not numbers either. It reports false
+// for an empty slice or a p that is not a number.
 func Quantile(v []float64, p float64) (float64, bool) {
-	if len(v) == 0 {
+	if len(v) == 0 || math.IsNaN(p) {
 		return 0, false
 	}
 	s := slices.Clone(v)
-	slices.Sort(s)
+	slices.SortFunc(s, totalOrder)
 	pos := min(max(p, 0), 1) * float64(len(s)-1)
 	i := int(math.Floor(pos))
 	f := pos - math.Floor(pos)

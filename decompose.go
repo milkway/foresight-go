@@ -8,11 +8,14 @@ import (
 // Decomposition is a series split into trend, one seasonal pattern per
 // period and remainder: the three add up to the series.
 type Decomposition struct {
+	// Periods are the seasonal periods taken out, in increasing order.
 	Periods []int
-	Trend   []float64
+	// Trend is the smooth part of the series.
+	Trend []float64
 	// Seasonal has one seasonal component per period, in the order of
 	// Periods.
-	Seasonal  [][]float64
+	Seasonal [][]float64
+	// Remainder is what trend and seasonality leave unexplained.
 	Remainder []float64
 }
 
@@ -70,11 +73,15 @@ func (d Decomposition) SeasonalStrength(i int) (float64, bool) {
 // low-pass window the next odd number after the period, local constant
 // fitting for the seasonal pattern and local linear for the rest, and LOESS
 // evaluated at every tenth of each window and interpolated in between.
+//
+// As in R, the series has to be longer than two full cycles.
 type Stl struct {
+	// Period is the seasonal period, at least 2.
 	Period int
-	// SeasonalWindow is the LOESS window over the cycles, an odd number of
-	// at least 7: the smaller, the faster the pattern may change. Zero keeps
-	// the same pattern in every cycle.
+	// SeasonalWindow is the LOESS window over the cycles, an odd number,
+	// usually 7 or more: the smaller, the faster the pattern may change. An
+	// even number is taken as the next odd one, and the least is 3. Zero
+	// keeps the same pattern in every cycle.
 	SeasonalWindow int
 	// TrendWindow and LowPassWindow are the LOESS windows of the trend and
 	// of the low-pass filter; zero stands for the defaults.
@@ -111,7 +118,8 @@ type stlSetup struct {
 }
 
 // Decompose decomposes the values. It returns an error for a period under 2,
-// fewer than two full cycles or values that are not finite.
+// a series that is not longer than two full cycles (as in R's stl) or values
+// that are not finite.
 func (s Stl) Decompose(y []float64) (Decomposition, error) {
 	n, np := len(y), s.Period
 	if np < 2 {
@@ -268,7 +276,15 @@ func robustnessWeights(y, fit []float64) []float64 {
 	sorted := slices.Clone(r)
 	slices.Sort(sorted)
 	middle := n / 2
-	cmad := 3 * (sorted[middle] + sorted[n-middle-1])
+	// on data the fit reproduces exactly the residuals are rounding noise,
+	// and telling them apart by size would discard points at random: the
+	// yardstick never goes below what rounding leaves
+	size := 0.0
+	for _, v := range y {
+		size += math.Abs(v)
+	}
+	size /= float64(n)
+	cmad := max(3*(sorted[middle]+sorted[n-middle-1]), 1e-10*size)
 	c9, c1 := 0.999*cmad, 0.001*cmad
 	for i, v := range r {
 		switch {
@@ -410,9 +426,11 @@ func loess(y []float64, window, degree, jump int, robustness []float64) []float6
 // Hyndman & Bergmeir, 2021).
 //
 // The periods are taken from the shortest to the longest; each pattern is
-// estimated on the series without the others, twice over. Periods longer
-// than half the series are left out. The trend comes from the last fit.
+// estimated on the series without the others, twice over. Periods that do
+// not fit more than twice in the series are left out. The trend comes from
+// the last fit.
 type Mstl struct {
+	// Periods are the seasonal periods; those under 2 are left out.
 	Periods []int
 	// Windows are the seasonal windows, one per period in increasing order
 	// of period; the last one is repeated if there are more periods than
@@ -425,8 +443,9 @@ type Mstl struct {
 	Robust bool
 }
 
-// Decompose decomposes the values. It returns an error when no period fits
-// twice in the series or the values are not finite.
+// Decompose decomposes the values. It returns an error when the series is
+// not longer than two cycles of any of the periods, or the values are not
+// finite.
 func (m Mstl) Decompose(y []float64) (Decomposition, error) {
 	n := len(y)
 	for _, v := range y {
@@ -487,9 +506,13 @@ func (m Mstl) Decompose(y []float64) (Decomposition, error) {
 //
 // The decomposition is [Mstl], so the series may have several seasonal
 // periods; by default the period is the one of the series. The model inside
-// sees a series without seasonality. For patterns that grow with the level,
-// wrap the whole in [Log].
+// sees a series without seasonality, at the same position in the original
+// data, so what goes by position (regressors, events, a deflator) stays
+// aligned. The series has to be longer than two cycles of a period for it
+// to be taken out. For patterns that grow with the level, wrap the whole in
+// [Log].
 type Decomposed struct {
+	// Model is the model of the seasonally adjusted series.
 	Model Model
 	// Periods are the seasonal periods to take out, instead of the period of
 	// the series.
@@ -505,6 +528,9 @@ type decomposedFit struct {
 }
 
 func (f decomposedFit) Forecast(h int) []float64 {
+	if h <= 0 {
+		return nil
+	}
 	out := f.inner.Forecast(h)
 	for k := range out {
 		for _, c := range f.cycles {
@@ -518,12 +544,21 @@ func (f decomposedFit) Params() []Param {
 	return append(f.inner.Params(), Param{"seasonal_periods", float64(len(f.cycles))})
 }
 
-func (d Decomposed) Name() string { return "stl_" + d.Model.Name() }
+// Name is the identifier of the model: "stl_" and the name of the model
+// inside ("stl_invalid" without one).
+func (d Decomposed) Name() string { return "stl_" + nameOf(d.Model) }
+
+// Description is a one-line description of the model.
 func (d Decomposed) Description() string {
-	return d.Model.Description() + ", on the series seasonally adjusted by STL"
+	return descriptionOf(d.Model) + ", on the series seasonally adjusted by STL"
 }
 
+// Fit decomposes the series and fits the model inside on what is left. It
+// returns [ErrConfig] without a model inside.
 func (d Decomposed) Fit(y Series) (Fitted, error) {
+	if d.Model == nil {
+		return nil, ErrConfig
+	}
 	periods := d.Periods
 	if periods == nil {
 		periods = []int{y.Period()}
@@ -536,7 +571,7 @@ func (d Decomposed) Fit(y Series) (Fitted, error) {
 	if err != nil {
 		return nil, err
 	}
-	inner, err := d.Model.Fit(NonSeasonal(parts.SeasonallyAdjusted()))
+	inner, err := d.Model.Fit(y.flat(parts.SeasonallyAdjusted()))
 	if err != nil {
 		return nil, err
 	}

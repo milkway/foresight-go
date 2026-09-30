@@ -37,11 +37,11 @@ func linearFill(values []float64) ([]float64, bool) {
 	return out, true
 }
 
-// Interpolate fills the gaps. Without seasonality (period under 2, or fewer
-// than two full cycles) by straight lines between the neighbours; with it,
-// the straight lines are drawn on the seasonally adjusted series and the
-// seasonal pattern is put back, so a gap in December is filled with a
-// December. It reports false when no value is known.
+// Interpolate fills the gaps. Without seasonality (period under 2, or a
+// series not longer than two full cycles) by straight lines between the
+// neighbours; with it, the straight lines are drawn on the seasonally
+// adjusted series and the seasonal pattern is put back, so a gap in December
+// is filled with a December. It reports false when no value is known.
 func Interpolate(values []float64, period int) ([]float64, bool) {
 	first, ok := linearFill(values)
 	if !ok {
@@ -80,6 +80,7 @@ func Interpolate(values []float64, period int) ([]float64, bool) {
 type Outlier struct {
 	// Index is the position in the series.
 	Index int
+	// Value is what was observed.
 	Value float64
 	// Replacement is what the neighbours and the season suggest instead.
 	Replacement float64
@@ -157,7 +158,12 @@ func Outliers(values []float64, period int) ([]Outlier, bool) {
 	}
 	q1, _ := Quantile(distance, 0.25)
 	q3, _ := Quantile(distance, 0.75)
-	reach := 3 * (q3 - q1)
+	// on exact data the spread is rounding noise: nothing is that far from it
+	size := 0.0
+	for _, v := range filled {
+		size = max(size, math.Abs(v))
+	}
+	reach := max(3*(q3-q1), 1e-9*size)
 	var flagged []int
 	for i, v := range values {
 		if finite(v) && (distance[i] < q1-reach || distance[i] > q3+reach) {

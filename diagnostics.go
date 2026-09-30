@@ -2,8 +2,12 @@ package foresight
 
 import "math"
 
-// ACF returns the autocorrelations of y at lags 1 to maxLag.
+// ACF returns the autocorrelations of y at lags 1 to maxLag; nothing for a
+// maxLag of zero or less.
 func ACF(y []float64, maxLag int) []float64 {
+	if maxLag <= 0 {
+		return nil
+	}
 	n := len(y)
 	m := sum(y) / float64(n)
 	c0 := 0.0
@@ -32,9 +36,10 @@ func centredAverage(y []float64, t, m int) float64 {
 }
 
 // Difference returns y differenced once at the given lag (1 for the ordinary
-// difference).
+// difference). A lag of zero or less, or one that is not shorter than y,
+// gives nothing.
 func Difference(y []float64, lag int) []float64 {
-	if lag >= len(y) {
+	if lag <= 0 || lag >= len(y) {
 		return nil
 	}
 	out := make([]float64, len(y)-lag)

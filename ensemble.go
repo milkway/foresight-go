@@ -25,6 +25,8 @@ const (
 	Stacked
 )
 
+func (w Weighting) valid() bool { return w >= InverseError && w <= Stacked }
+
 // Ensemble is a model made of other models.
 //
 // The weights are learnt from the series itself: the last Origins periods
@@ -36,8 +38,14 @@ const (
 // Being a model, an ensemble can be a candidate in a [Backtest], next to its
 // own members: its weights are then learnt again at every origin, from what
 // was known at that point.
+//
+// The forecasts that teach the weights are made on several cores (see
+// [SetMaxThreads]), except inside a backtest, where the ensemble keeps to
+// the goroutine that fits it.
 type Ensemble struct {
-	Members   []Candidate
+	// Members are the models combined; each needs a model.
+	Members []Candidate
+	// Weighting says how they are combined (default InverseError).
 	Weighting Weighting
 	// Origins is how many of the last periods are forecast to learn the
 	// weights (default 12).
@@ -77,9 +85,15 @@ func (e Ensemble) errors(y Series) [][]float64 {
 	if scale <= 0 {
 		scale = 1
 	}
+	// inside a parallel computation, this one stays on its goroutine; and
+	// what its own workers fit stays on theirs
+	workers := threads(origins, y.alone)
+	if workers > 1 {
+		y = y.onOneGoroutine()
+	}
 	for i, member := range e.Members {
-		forecasts := mapIndices(origins, false, func(k int) []float64 {
-			p, err := Forecast(member.Model, y.Head(first+k), horizon)
+		forecasts := mapIndices(origins, workers, func(k int) []float64 {
+			p, err := tryForecast(member.Model, y.Head(first+k), horizon)
 			if err != nil || len(p) != horizon {
 				return nil
 			}
@@ -213,22 +227,32 @@ type ensembleFit struct {
 }
 
 func (f ensembleFit) Forecast(h int) []float64 {
+	if h <= 0 {
+		return nil
+	}
 	each := make([][]float64, len(f.members))
 	for i, m := range f.members {
 		each[i] = m.fit.Forecast(h)
+	}
+	// a member that stops short has nothing to say from there on
+	at := func(i, k int) float64 {
+		if k < len(each[i]) {
+			return each[i][k]
+		}
+		return math.NaN()
 	}
 	out := make([]float64, h)
 	for k := range out {
 		if f.median {
 			column := make([]float64, len(each))
 			for i := range each {
-				column[i] = each[i][k]
+				column[i] = at(i, k)
 			}
 			out[k], _ = Quantile(column, 0.5)
 			continue
 		}
 		for i, m := range f.members {
-			out[k] += m.weight * each[i][k]
+			out[k] += m.weight * at(i, k)
 		}
 	}
 	return out
@@ -242,11 +266,20 @@ func (f ensembleFit) Params() []Param {
 	return out
 }
 
+// Name is the identifier of the model, after its weighting;
+// "ensemble_invalid" for a weighting that is not one of the named ones.
 func (e Ensemble) Name() string {
+	if !e.Weighting.valid() {
+		return "ensemble_invalid"
+	}
 	return "ensemble_" + [...]string{"inverse_error", "equal", "median", "stacked"}[e.Weighting]
 }
 
+// Description is a one-line description of the ensemble and its members.
 func (e Ensemble) Description() string {
+	if !e.Weighting.valid() {
+		return "Ensemble with an invalid weighting"
+	}
 	how := [...]string{
 		"average weighted by inverse error", "average", "median",
 		"combination with the weights of least error",
@@ -260,7 +293,29 @@ func (e Ensemble) Description() string {
 
 func meanSquare(e []float64) float64 { return dot(e, e) / float64(len(e)) }
 
+// fitMember fits a member on the whole series; a panic of the model comes
+// back as an error, as it does from the forecasts that teach the weights.
+func fitMember(m Model, y Series) (fit Fitted, err error) {
+	defer func() {
+		if recover() != nil {
+			fit, err = nil, errPanic
+		}
+	}()
+	return m.Fit(y)
+}
+
+// Fit learns the weights and fits the members on the whole series. It
+// returns [ErrConfig] for a weighting that is not one of the named ones or a
+// member without a model, and [ErrNoCandidate] when no member can be fitted.
 func (e Ensemble) Fit(y Series) (Fitted, error) {
+	if !e.Weighting.valid() {
+		return nil, ErrConfig
+	}
+	for _, m := range e.Members {
+		if m.Model == nil {
+			return nil, ErrConfig
+		}
+	}
 	learnt := e.Weighting == InverseError || e.Weighting == Stacked || e.Top > 0
 	errs := make([][]float64, len(e.Members))
 	if learnt {
@@ -269,7 +324,7 @@ func (e Ensemble) Fit(y Series) (Fitted, error) {
 	// members fitted on the whole series, with their errors if any
 	var fitted []ensembleMember
 	for i, m := range e.Members {
-		if fit, err := m.Model.Fit(y); err == nil {
+		if fit, err := fitMember(m.Model, y); err == nil && fit != nil {
 			fitted = append(fitted, ensembleMember{name: m.Name, fit: fit, errors: errs[i]})
 		}
 	}

@@ -24,6 +24,9 @@ type thetaFit struct {
 }
 
 func (f thetaFit) Forecast(h int) []float64 {
+	if h <= 0 {
+		return nil
+	}
 	carry := (1 - math.Pow(1-f.alpha, float64(f.n))) / f.alpha
 	out := make([]float64, h)
 	for k := 1; k <= h; k++ {
@@ -143,11 +146,15 @@ func bestAlpha(y []float64) float64 {
 	return (lo + hi) / 2
 }
 
+// Name is the identifier of the model.
 func (Theta) Name() string { return "theta" }
+
+// Description is a one-line description of the model.
 func (Theta) Description() string {
 	return "Theta method: exponential smoothing with drift, on seasonally adjusted data when seasonal"
 }
 
+// Fit estimates the model; it needs three observations.
 func (Theta) Fit(y Series) (Fitted, error) {
 	v, m, n := y.Values(), y.Period(), y.Len()
 	if n < 3 {

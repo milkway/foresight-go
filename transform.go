@@ -8,6 +8,7 @@ import (
 // BoxCox is a transformation of the Box-Cox family: the logarithm for λ = 0,
 // (y^λ − 1)/λ otherwise. It is defined for positive values.
 type BoxCox struct {
+	// Lambda is λ; zero is the logarithm.
 	Lambda float64
 }
 
@@ -77,6 +78,7 @@ func Guerrero(y Series) (BoxCox, bool) {
 //
 // Use [Log], [WithBoxCox] or [WithGuerrero] to make one.
 type Transformed struct {
+	// Model is the model of the transformed values.
 	Model Model
 	// Transform is the transformation, unless Automatic.
 	Transform BoxCox
@@ -104,6 +106,9 @@ type transformedFit struct {
 }
 
 func (f transformedFit) Forecast(h int) []float64 {
+	if h <= 0 {
+		return nil
+	}
 	out := f.inner.Forecast(h)
 	for i, z := range out {
 		out[i] = f.transform.Invert(z)
@@ -117,25 +122,33 @@ func (f transformedFit) Params() []Param {
 
 func (t Transformed) isLog() bool { return !t.Automatic && t.Transform.Lambda == 0 }
 
+// Name is the identifier of the model: "log_" or "boxcox_" and the name of
+// the model inside ("log_invalid" without one).
 func (t Transformed) Name() string {
 	if t.isLog() {
-		return "log_" + t.Model.Name()
+		return "log_" + nameOf(t.Model)
 	}
-	return "boxcox_" + t.Model.Name()
+	return "boxcox_" + nameOf(t.Model)
 }
 
+// Description is a one-line description of the model.
 func (t Transformed) Description() string {
 	switch {
 	case t.isLog():
-		return t.Model.Description() + ", on the log scale"
+		return descriptionOf(t.Model) + ", on the log scale"
 	case t.Automatic:
-		return t.Model.Description() + ", on the Box-Cox scale (λ by Guerrero's method)"
+		return descriptionOf(t.Model) + ", on the Box-Cox scale (λ by Guerrero's method)"
 	}
-	return t.Model.Description() + ", on the Box-Cox scale (λ = " +
+	return descriptionOf(t.Model) + ", on the Box-Cox scale (λ = " +
 		strconv.FormatFloat(t.Transform.Lambda, 'f', -1, 64) + ")"
 }
 
+// Fit transforms the series and fits the model inside. It returns
+// [ErrConfig] without a model inside.
 func (t Transformed) Fit(y Series) (Fitted, error) {
+	if t.Model == nil {
+		return nil, ErrConfig
+	}
 	if !y.IsPositive() {
 		return nil, ErrNotPositive
 	}

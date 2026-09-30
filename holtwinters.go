@@ -68,6 +68,9 @@ type hwFit struct {
 
 // ŷ(T+k) = (L + (φ + φ² + … + φᵏ)·B) × S(season of T+k).
 func (f hwFit) Forecast(h int) []float64 {
+	if h <= 0 {
+		return nil
+	}
 	m := len(f.state.seasonal)
 	damp, pow := 0.0, 1.0
 	out := make([]float64, h)
@@ -87,11 +90,16 @@ func (f hwFit) Params() []Param {
 	}
 }
 
+// Name is the identifier of the model.
 func (HoltWinters) Name() string { return "holt_winters" }
+
+// Description is a one-line description of the model.
 func (HoltWinters) Description() string {
 	return "Holt-Winters, multiplicative seasonality and damped trend (grid search on one-step error)"
 }
 
+// Fit estimates the model; it needs a seasonal series of three full cycles
+// of positive values.
 func (HoltWinters) Fit(y Series) (Fitted, error) {
 	v, m := y.Values(), y.Period()
 	if m < 2 {

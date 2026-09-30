@@ -30,14 +30,19 @@ const (
 //
 // The zero value has the usual limits; see [DefaultAutoArima].
 type AutoArima struct {
-	// Limits of the search. When all six are zero they stand for the
-	// defaults: 5, 5, 2, 2, 2 and 1.
+	// Limits of the search: the highest orders and the most differences. A
+	// zero stands for the default of that limit alone: 5, 5, 2, 2, 2 and 1.
+	// A negative number is a limit of zero: MaxSeasonalP: -1 allows no
+	// seasonal autoregression, MaxD: -1 no ordinary difference.
 	MaxP, MaxQ, MaxSeasonalP, MaxSeasonalQ, MaxD, MaxSeasonalD int
-	// FixDifferences uses D and SeasonalD instead of testing.
+	// FixDifferences uses D and SeasonalD, which may not be negative,
+	// instead of testing.
 	FixDifferences bool
 	D, SeasonalD   int
-	Criterion      Criterion
-	// MaxModels is the most models the search will fit (default 94).
+	// Criterion ranks the models (default ByAICc).
+	Criterion Criterion
+	// MaxModels is the most models the search will fit (default 94, also
+	// for a negative number).
 	MaxModels int
 	// Regressors are external variables of a regression with ARIMA errors;
 	// the differences are then decided on what the regression leaves
@@ -52,10 +57,21 @@ func DefaultAutoArima() AutoArima {
 
 func (a AutoArima) filled() AutoArima {
 	d := DefaultAutoArima()
-	if a.MaxP == 0 && a.MaxQ == 0 && a.MaxSeasonalP == 0 && a.MaxSeasonalQ == 0 && a.MaxD == 0 && a.MaxSeasonalD == 0 {
-		a.MaxP, a.MaxQ, a.MaxSeasonalP, a.MaxSeasonalQ = d.MaxP, d.MaxQ, d.MaxSeasonalP, d.MaxSeasonalQ
-		a.MaxD, a.MaxSeasonalD = d.MaxD, d.MaxSeasonalD
+	// zero is the default, a negative number is none
+	limit := func(value *int, fallback int) {
+		switch {
+		case *value == 0:
+			*value = fallback
+		case *value < 0:
+			*value = 0
+		}
 	}
+	limit(&a.MaxP, d.MaxP)
+	limit(&a.MaxQ, d.MaxQ)
+	limit(&a.MaxSeasonalP, d.MaxSeasonalP)
+	limit(&a.MaxSeasonalQ, d.MaxSeasonalQ)
+	limit(&a.MaxD, d.MaxD)
+	limit(&a.MaxSeasonalD, d.MaxSeasonalD)
 	if a.MaxModels <= 0 {
 		a.MaxModels = d.MaxModels
 	}
@@ -120,9 +136,13 @@ type arimaKey struct {
 	constant     bool
 }
 
-// Select chooses the orders and returns the estimated model.
+// Select chooses the orders and returns the estimated model. It returns
+// [ErrConfig] for fixed differences that are negative.
 func (a AutoArima) Select(y Series) (*ArimaFit, error) {
 	a = a.filled()
+	if a.FixDifferences && (a.D < 0 || a.SeasonalD < 0) {
+		return nil, ErrConfig
+	}
 	if y.Len() == 0 {
 		return nil, ErrTooShort
 	}
@@ -190,7 +210,10 @@ func (a AutoArima) Select(y Series) (*ArimaFit, error) {
 		if !finite(score) || !fit.IsWellBehaved(1.01) {
 			return false
 		}
-		if best == nil || score < bestScore {
+		// among models that fit equally (exact fits), the one with fewer
+		// parameters
+		size := func(k arimaKey) int { return k.p + k.q + k.sp + k.sq + count(k.constant) }
+		if best == nil || score < bestScore || (score == bestScore && size(k) < size(bestKey)) {
 			best, bestKey, bestScore = fit, k, score
 			return true
 		}
@@ -248,11 +271,15 @@ func (a AutoArima) Select(y Series) (*ArimaFit, error) {
 	return best, nil
 }
 
+// Name is the identifier of the model.
 func (AutoArima) Name() string { return "auto_arima" }
+
+// Description is a one-line description of the model.
 func (AutoArima) Description() string {
 	return "ARIMA with differences chosen by tests and orders by stepwise search on the information criterion"
 }
 
+// Fit chooses the orders and estimates the model; see [AutoArima.Select].
 func (a AutoArima) Fit(y Series) (Fitted, error) {
 	fit, err := a.Select(y)
 	if err != nil {

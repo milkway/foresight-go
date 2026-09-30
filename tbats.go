@@ -12,8 +12,9 @@ type Choice int
 const (
 	// Choose lets the model decide.
 	Choose Choice = iota
-	// Yes and No fix the answer.
+	// Yes fixes the answer: it is so.
 	Yes
+	// No fixes the answer: it is not so.
 	No
 )
 
@@ -59,7 +60,7 @@ type Tbats struct {
 	// follow an ARMA process.
 	BoxCox, Trend, Damped, ArmaErrors Choice
 	// FixOrders uses P and Q as the orders of the ARMA errors instead of
-	// choosing them.
+	// choosing them. Neither may be negative.
 	FixOrders bool
 	P, Q      int
 }
@@ -402,8 +403,9 @@ func attemptTbats(shape tbatsShape, y []float64, startLambda float64, how effort
 				return tbatsAttempt{}, false
 			}
 		}
+		// an exact fit: what is left is rounding noise next to the data
 		fit := -1e300
-		if squares > 0 {
+		if size := dot(z, z); squares > 1e-20*size {
 			fit = float64(n) * math.Log(squares)
 		}
 		lambda := 1.0
@@ -450,8 +452,12 @@ type TbatsFit struct {
 	Sigma2 float64
 }
 
-// Select chooses what was left open and returns the estimated model.
+// Select chooses what was left open and returns the estimated model. It
+// returns [ErrConfig] for a negative P or Q.
 func (t Tbats) Select(y Series) (*TbatsFit, error) {
+	if t.P < 0 || t.Q < 0 {
+		return nil, ErrConfig
+	}
 	v := y.Values()
 	if len(v) < 8 {
 		return nil, ErrTooShort
@@ -632,7 +638,13 @@ func (f *TbatsFit) Residuals() []float64 { return f.attempt.errors }
 // InitialStates returns the states before the first observation.
 func (f *TbatsFit) InitialStates() []float64 { return f.attempt.seed }
 
+// Forecast returns the forecasts for the h periods after the last
+// observation; nothing for an h of zero or less, or for a fit that did not
+// come from [Tbats.Select].
 func (f *TbatsFit) Forecast(h int) []float64 {
+	if h <= 0 || f == nil || len(f.attempt.last) == 0 {
+		return nil
+	}
 	a := f.attempt
 	machine := newTbatsMachine(a.shape, a.values)
 	x := a.last
@@ -647,6 +659,7 @@ func (f *TbatsFit) Forecast(h int) []float64 {
 	return out
 }
 
+// Params returns the smoothing parameters, the structure chosen and the fit.
 func (f *TbatsFit) Params() []Param {
 	a := f.attempt
 	p := []Param{{"alpha", a.values.alpha}}
@@ -674,11 +687,15 @@ func (f *TbatsFit) Params() []Param {
 	return append(p, Param{"sigma2", f.Sigma2}, Param{"aic", a.aic})
 }
 
+// Name is the identifier of the model.
 func (Tbats) Name() string { return "tbats" }
+
+// Description is a one-line description of the model.
 func (Tbats) Description() string {
 	return "TBATS: trigonometric seasonality, Box-Cox, ARMA errors and trend, chosen by AIC"
 }
 
+// Fit chooses the structure and estimates the model; see [Tbats.Select].
 func (t Tbats) Fit(y Series) (Fitted, error) {
 	fit, err := t.Select(y)
 	if err != nil {

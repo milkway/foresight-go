@@ -17,18 +17,21 @@ const (
 	TSB
 )
 
+func (i Intermittent) valid() bool { return i >= CrostonMethod && i <= TSB }
+
 // Croston forecasts the demand per period of intermittent series, where most
 // periods have no demand at all.
 //
 // The values must not be negative. The forecast is the same for every
 // horizon: the rate at which demand is expected to arrive.
 type Croston struct {
+	// Variant is the method (default CrostonMethod).
 	Variant Intermittent
 	// Alpha is the smoothing of the demand sizes (and of the intervals),
 	// above 0 and up to 1 (default 0.1).
 	Alpha float64
 	// Beta is the smoothing of the probability of demand, for TSB (default:
-	// the same as Alpha).
+	// the same as Alpha). The other variants do not use it.
 	Beta float64
 	// Optimised chooses the smoothing that minimises the squared error of
 	// the rate against what was demanded, instead of a fixed value.
@@ -91,7 +94,12 @@ type crostonFit struct {
 	variant           Intermittent
 }
 
-func (f crostonFit) Forecast(h int) []float64 { return repeat(f.rate, h) }
+func (f crostonFit) Forecast(h int) []float64 {
+	if h <= 0 {
+		return nil
+	}
+	return repeat(f.rate, h)
+}
 
 func (f crostonFit) Params() []Param {
 	p := []Param{{"alpha", f.alpha}, {"demand_size", f.state.size}}
@@ -101,11 +109,20 @@ func (f crostonFit) Params() []Param {
 	return append(p, Param{"demand_interval", f.state.interval})
 }
 
+// Name is the identifier of the model, after its variant; "croston_invalid"
+// for a variant that is not one of the named ones.
 func (c Croston) Name() string {
+	if !c.Variant.valid() {
+		return "croston_invalid"
+	}
 	return [...]string{"croston", "croston_sba", "croston_tsb"}[c.Variant]
 }
 
+// Description is a one-line description of the model.
 func (c Croston) Description() string {
+	if !c.Variant.valid() {
+		return "Croston with an invalid variant"
+	}
 	return [...]string{
 		"Croston: demand size ÷ interval between demands, each smoothed",
 		"Croston with the Syntetos-Boylan correction of bias",
@@ -113,7 +130,12 @@ func (c Croston) Description() string {
 	}[c.Variant]
 }
 
+// Fit estimates the model. It returns [ErrConfig] for a variant that is not
+// one of the named ones.
 func (c Croston) Fit(y Series) (Fitted, error) {
+	if !c.Variant.valid() {
+		return nil, ErrConfig
+	}
 	v := y.Values()
 	if len(v) == 0 {
 		return nil, ErrTooShort
@@ -147,7 +169,8 @@ func (c Croston) Fit(y Series) (Fitted, error) {
 		beta = alpha
 	}
 	inside := func(a float64) bool { return a > 0 && a <= 1 }
-	if !inside(alpha) || !inside(beta) {
+	// a smoothing that the method does not use is not checked
+	if !inside(alpha) || (c.Variant == TSB && !inside(beta)) {
 		return nil, ErrNoFit
 	}
 	state, ok := c.run(v, alpha, beta)

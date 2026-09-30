@@ -37,7 +37,8 @@ type Prophet struct {
 	SeasonalityPriorScale float64
 	// FourierOrder is the number of harmonics of the seasonal pattern
 	// (default 10, or half the period when that is less, which describes any
-	// pattern of that period). Use NoSeasonality for none.
+	// pattern of that period). Use NoSeasonality for none. There is no
+	// seasonal pattern before two full cycles of history either.
 	FourierOrder int
 	// NoSeasonality leaves the seasonal pattern out.
 	NoSeasonality bool
@@ -50,6 +51,7 @@ type Prophet struct {
 
 // Event is something dated that moves the series.
 type Event struct {
+	// Name identifies the effect of the event among the parameters.
 	Name string
 	// Positions are where a recurring event happens, in the ORIGINAL data
 	// (see [Series.Index]), past and future: one effect is estimated for all
@@ -117,9 +119,11 @@ func (p Prophet) filled() Prophet {
 	return p
 }
 
-// harmonics actually used for a series of period m.
-func (p Prophet) harmonics(m int) int {
-	if m < 2 {
+// harmonics actually used for n observations of a series of period m: none
+// before two full cycles, as a pattern seen once cannot be told from the
+// trend.
+func (p Prophet) harmonics(m, n int) int {
+	if m < 2 || n < 2*m {
 		return 0
 	}
 	return min(p.FourierOrder, m/2)
@@ -317,6 +321,9 @@ type ProphetFit struct {
 	at          []int
 }
 
+// empty reports whether the fit is the zero value rather than an estimate.
+func (f *ProphetFit) empty() bool { return f == nil || len(f.theta) == 0 }
+
 // Estimate fits the model and returns everything that was estimated.
 func (p Prophet) Estimate(y Series) (*ProphetFit, error) {
 	p = p.filled()
@@ -331,6 +338,9 @@ func (p Prophet) Estimate(y Series) (*ProphetFit, error) {
 		if !finite(s) || s <= 0 {
 			return nil, ErrNoFit
 		}
+	}
+	if math.IsNaN(p.ChangepointRange) {
+		return nil, ErrConfig
 	}
 	scale := 0.0
 	for _, x := range v {
@@ -355,7 +365,7 @@ func (p Prophet) Estimate(y Series) (*ProphetFit, error) {
 			at = append(at, k)
 		}
 	}
-	layout := prophetLayout{span: span, harmonics: p.harmonics(m), period: m, events: p.Events}
+	layout := prophetLayout{span: span, harmonics: p.harmonics(m, n), period: m, events: p.Events}
 	for _, i := range at {
 		layout.changepoints = append(layout.changepoints, float64(i)/span)
 	}
@@ -432,7 +442,12 @@ func (p Prophet) Estimate(y Series) (*ProphetFit, error) {
 	}, nil
 }
 
+// components are not numbers for a fit that did not come from
+// [Prophet.Estimate].
 func (f *ProphetFit) components(i int) (trend, seasonal, events float64) {
+	if f.empty() {
+		return math.NaN(), math.NaN(), math.NaN()
+	}
 	season := (f.firstSeason + i) % max(f.layout.period, 1)
 	row := f.layout.row(i, f.start+i, season)
 	part := func(from, to int) float64 {
@@ -470,6 +485,9 @@ type Changepoint struct {
 
 // Changepoints returns the changepoints where the trend did bend.
 func (f *ProphetFit) Changepoints() []Changepoint {
+	if f.empty() {
+		return nil
+	}
 	var out []Changepoint
 	first, _ := f.layout.rangeChangepoints()
 	for k, i := range f.at {
@@ -483,6 +501,9 @@ func (f *ProphetFit) Changepoints() []Changepoint {
 // Effects returns the estimated effect of each event, in units of the
 // series.
 func (f *ProphetFit) Effects() []Param {
+	if f.empty() {
+		return nil
+	}
 	first, _ := f.layout.rangeEvents()
 	out := make([]Param, len(f.layout.events))
 	for k, e := range f.layout.events {
@@ -501,14 +522,38 @@ func (f *ProphetFit) values(from, to int) []float64 {
 }
 
 // FittedValues returns the values fitted to the history.
-func (f *ProphetFit) FittedValues() []float64 { return f.values(0, f.n) }
+func (f *ProphetFit) FittedValues() []float64 {
+	if f.empty() {
+		return nil
+	}
+	return f.values(0, f.n)
+}
 
 // Sigma returns the standard deviation of the noise, in units of the series.
-func (f *ProphetFit) Sigma() float64 { return f.sigma * f.scale }
+func (f *ProphetFit) Sigma() float64 {
+	if f.empty() {
+		return math.NaN()
+	}
+	return f.sigma * f.scale
+}
 
-func (f *ProphetFit) Forecast(h int) []float64 { return f.values(f.n, f.n+h) }
+// Forecast returns the forecasts for the h periods after the last
+// observation; nothing for an h of zero or less, or for a fit that did not
+// come from [Prophet.Estimate].
+func (f *ProphetFit) Forecast(h int) []float64 {
+	if h <= 0 || f.empty() {
+		return nil
+	}
+	return f.values(f.n, f.n+h)
+}
 
+// Params returns the slopes of the trend, the number of changepoints, the
+// noise and the effects of the events; nothing for a fit that did not come
+// from [Prophet.Estimate].
 func (f *ProphetFit) Params() []Param {
+	if f.empty() {
+		return nil
+	}
 	slope := f.scale / f.layout.span
 	final := f.theta[0]
 	for j, to := f.layout.rangeChangepoints(); j < to; j++ {
@@ -526,11 +571,15 @@ func (f *ProphetFit) Params() []Param {
 	return p
 }
 
+// Name is the identifier of the model.
 func (Prophet) Name() string { return "prophet" }
+
+// Description is a one-line description of the model.
 func (Prophet) Description() string {
 	return "Prophet: piecewise linear trend with changepoints, Fourier seasonality and events"
 }
 
+// Fit estimates the model; see [Prophet.Estimate].
 func (p Prophet) Fit(y Series) (Fitted, error) {
 	fit, err := p.Estimate(y)
 	if err != nil {

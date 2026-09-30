@@ -7,19 +7,27 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // Candidate is a model taking part in a backtest, under a name of the
 // caller's choice.
 type Candidate struct {
-	Name        string
+	// Name identifies the candidate in the report.
+	Name string
+	// Description is a line about the candidate, for display.
 	Description string
-	Model       Model
+	// Model is what is fitted. A candidate without one takes no part.
+	Model Model
 }
 
 // NewCandidate returns a candidate with the model's own name and
-// description.
+// description. A nil model gives the zero Candidate, which takes no part in
+// a backtest.
 func NewCandidate(m Model) Candidate {
+	if m == nil {
+		return Candidate{}
+	}
 	return Candidate{Name: m.Name(), Description: m.Description(), Model: m}
 }
 
@@ -70,20 +78,44 @@ type Backtest struct {
 	// MinTrain is the number of training observations at the first origin
 	// (default 48). Shorter series get fewer origins.
 	MinTrain int
-	// Window trains on the last Window observations only; zero uses
-	// everything before the origin.
+	// Window trains on the last Window observations only, at every origin
+	// and for the final forecast; zero uses everything before the origin.
 	Window int
 	// Combine also evaluates the simple average of the best Combine models
 	// (default 2; 1 disables it).
 	Combine int
 	// Levels is the coverage of the intervals, such as 0.8 for the 10%–90%
-	// quantiles (default 0.80 and 0.95).
+	// quantiles, each one above 0 and below 1 (default 0.80 and 0.95).
 	Levels []float64
 	// Metric ranks the candidates (default RankByMAPE).
 	Metric Metric
-	// Sequential fits the origins one at a time instead of on all cores. The
-	// result is the same either way.
+	// Sequential fits the origins one at a time, on the calling goroutine,
+	// instead of on several cores (see [SetMaxThreads]); the ensembles among
+	// the candidates then start no goroutines either. The result is the same
+	// either way.
 	Sequential bool
+}
+
+// maxThreads is the most goroutines a computation may use; 0 stands for
+// every core.
+var maxThreads atomic.Int64
+
+// SetMaxThreads limits the goroutines used at a time by each backtest and
+// each ensemble, in the whole process. Zero, the default, stands for every
+// core Go may use (GOMAXPROCS); a negative number is read as zero.
+//
+// The results do not depend on the number of goroutines.
+func SetMaxThreads(n int) {
+	maxThreads.Store(int64(max(n, 0)))
+}
+
+// MaxThreads returns the most goroutines a backtest or an ensemble will use:
+// what was set with [SetMaxThreads], or the number of cores Go may use.
+func MaxThreads() int {
+	if limit := int(maxThreads.Load()); limit > 0 {
+		return limit
+	}
+	return max(runtime.GOMAXPROCS(0), 1)
 }
 
 // DefaultBacktest returns the defaults, which suit monthly data: 36 origins,
@@ -133,7 +165,9 @@ type HorizonStats struct {
 	// Bias is the mean of (forecast − actual)/actual, in percent; positive
 	// when the forecasts ran high.
 	Bias float64
-	MAE  float64
+	// MAE is the mean absolute error.
+	MAE float64
+	// RMSE is the root mean squared error.
 	RMSE float64
 	// MASE is the mean absolute error scaled by the in-sample seasonal naive
 	// error of each training set.
@@ -146,7 +180,8 @@ type HorizonStats struct {
 	Cumulative []Band
 }
 
-// Interval is an interval around a forecast.
+// Interval is an interval around a forecast, with its coverage: Lower is
+// never above Upper.
 type Interval struct {
 	Level, Lower, Upper float64
 }
@@ -155,15 +190,19 @@ type Interval struct {
 type Point struct {
 	// Horizon is the number of periods ahead (for a cumulative forecast, how
 	// many were added up).
-	Horizon   int
-	Mean      float64
+	Horizon int
+	// Mean is the point forecast.
+	Mean float64
+	// Intervals has one interval per level of the backtest.
 	Intervals []Interval
 }
 
 func newPoint(horizon int, mean float64, bands []Band) Point {
 	p := Point{Horizon: horizon, Mean: mean, Intervals: make([]Interval, len(bands))}
 	for i, b := range bands {
-		p.Intervals[i] = Interval{b.Level, mean * (1 + b.Lower), mean * (1 + b.Upper)}
+		// a negative forecast turns the bounds around
+		a, z := mean*(1+b.Lower), mean*(1+b.Upper)
+		p.Intervals[i] = Interval{b.Level, min(a, z), max(a, z)}
 	}
 	return p
 }
@@ -182,6 +221,8 @@ func (p Point) Interval(level float64) (Interval, bool) {
 // CandidateReport is the backtest and the forecast of one candidate (a model
 // or an average of models).
 type CandidateReport struct {
+	// Name and Description are those of the candidate; an average is named
+	// after its components.
 	Name        string
 	Description string
 	// Components are the names of the models involved: one, or several for
@@ -206,7 +247,7 @@ type CandidateReport struct {
 // intervals from the backtest of sums. It reports false when k is under 1 or
 // beyond the horizon.
 func (c CandidateReport) Cumulative(k int) (Point, bool) {
-	if k < 1 || k > len(c.Forecast) {
+	if k < 1 || k > len(c.Forecast) || k > len(c.Horizons) {
 		return Point{}, false
 	}
 	total := 0.0
@@ -228,15 +269,27 @@ type Report struct {
 	// FirstOrigin is the position in the series of the first period
 	// forecast in the backtest.
 	FirstOrigin int
-	Horizon     int
-	Metric      Metric
+	// Horizon is the longest horizon forecast and evaluated.
+	Horizon int
+	// Metric is the measure that ranked the candidates.
+	Metric Metric
 }
 
-// Best returns the chosen candidate.
-func (r *Report) Best() *CandidateReport { return &r.Candidates[r.Chosen] }
+// Best returns the chosen candidate. For a report that did not come from
+// [Backtest.Run] (no candidates, or Chosen out of range) it returns an empty
+// CandidateReport.
+func (r *Report) Best() *CandidateReport {
+	if r == nil || r.Chosen < 0 || r.Chosen >= len(r.Candidates) {
+		return &CandidateReport{}
+	}
+	return &r.Candidates[r.Chosen]
+}
 
 // Candidate looks a candidate up by name.
 func (r *Report) Candidate(name string) (*CandidateReport, bool) {
+	if r == nil {
+		return nil, false
+	}
 	for i := range r.Candidates {
 		if r.Candidates[i].Name == name {
 			return &r.Candidates[i], true
@@ -250,8 +303,11 @@ var (
 	// ErrFewOrigins: the series is too short for at least one pair at the
 	// longest horizon.
 	ErrFewOrigins = errors.New("foresight: series too short for the backtest")
-	// ErrNoCandidate: no candidate could be fitted at every origin.
+	// ErrNoCandidate: no candidate gave finite forecasts at every origin and
+	// from the whole series.
 	ErrNoCandidate = errors.New("foresight: no candidate could be fitted at every origin")
+	// ErrLevels: a level of the intervals is not above 0 and below 1.
+	ErrLevels = errors.New("foresight: levels must be above 0 and below 1")
 )
 
 func bands(errs, levels []float64) []Band {
@@ -267,32 +323,47 @@ func bands(errs, levels []float64) []Band {
 	return out
 }
 
-// mapIndices returns f(0), …, f(n − 1), computed on all cores unless
-// sequential.
-func mapIndices[T any](n int, sequential bool, f func(int) T) []T {
+// threads returns how many goroutines a computation of n independent parts
+// may use: at most [MaxThreads], and only the calling one when alone, which
+// is how a computation started from inside another (an ensemble in a worker
+// of a backtest) is told not to multiply the goroutines.
+func threads(n int, alone bool) int {
+	if alone {
+		return 1
+	}
+	return max(min(MaxThreads(), n), 1)
+}
+
+// mapIndices returns f(0), …, f(n − 1), computed on the given number of
+// goroutines, the calling one included.
+func mapIndices[T any](n, workers int, f func(int) T) []T {
 	out := make([]T, n)
-	workers := min(runtime.NumCPU(), n)
-	if sequential || workers <= 1 {
+	if workers <= 1 {
 		for i := range out {
 			out[i] = f(i)
 		}
 		return out
 	}
+	var next atomic.Int64
+	work := func() {
+		for {
+			i := int(next.Add(1)) - 1
+			if i >= n {
+				return
+			}
+			out[i] = f(i)
+		}
+	}
 	var wg sync.WaitGroup
-	next := make(chan int)
-	for range workers {
+	for range min(workers, n) - 1 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for i := range next {
-				out[i] = f(i)
-			}
+			work()
 		}()
 	}
-	for i := range n {
-		next <- i
-	}
-	close(next)
+	// the calling goroutine works too
+	work()
 	wg.Wait()
 	return out
 }
@@ -304,7 +375,9 @@ func (b Backtest) train(y Series, origin int) Series {
 	return y.Head(origin)
 }
 
-func (b Backtest) stats(y Series, first int, trajectories [][]float64) []HorizonStats {
+// stats returns the measures by horizon and, for each horizon, how many
+// pairs the ranking metric was computed from.
+func (b Backtest) stats(y Series, first int, trajectories [][]float64) ([]HorizonStats, []int) {
 	v, n := y.Values(), y.Len()
 	scales := make([]float64, len(trajectories))
 	scaled := make([]bool, len(trajectories))
@@ -312,6 +385,7 @@ func (b Backtest) stats(y Series, first int, trajectories [][]float64) []Horizon
 		scales[k], scaled[k] = MASEScale(b.train(y, first+k).Values(), y.Period())
 	}
 	out := make([]HorizonStats, b.Horizon)
+	pairs := make([]int, b.Horizon)
 	for h := 1; h <= b.Horizon; h++ {
 		var absPct, pct, abs, sq, mase, rel, cum []float64
 		for k, forecast := range trajectories {
@@ -347,13 +421,27 @@ func (b Backtest) stats(y Series, first int, trajectories [][]float64) []Horizon
 			Bands:      bands(rel, b.Levels),
 			Cumulative: bands(cum, b.Levels),
 		}
+		switch b.Metric {
+		case RankByMAE, RankByRMSE:
+			pairs[h-1] = len(abs)
+		case RankByMASE:
+			pairs[h-1] = len(mase)
+		default:
+			pairs[h-1] = len(absPct)
+		}
 	}
-	return out
+	return out, pairs
 }
 
-func (b Backtest) score(horizons []HorizonStats) float64 {
+// score is the ranking metric averaged over the horizons that have pairs to
+// compute it from; +Inf when there is none or when it is not finite at one
+// of them, so that what cannot be measured never ranks first.
+func (b Backtest) score(horizons []HorizonStats, pairs []int) float64 {
 	var values []float64
-	for _, s := range horizons {
+	for h, s := range horizons {
+		if pairs[h] == 0 {
+			continue
+		}
 		v := s.MAPE
 		switch b.Metric {
 		case RankByMAE:
@@ -363,9 +451,10 @@ func (b Backtest) score(horizons []HorizonStats) float64 {
 		case RankByMASE:
 			v = s.MASE
 		}
-		if !math.IsNaN(v) {
-			values = append(values, v)
+		if !finite(v) {
+			return math.Inf(1)
 		}
+		values = append(values, v)
 	}
 	if m := mean(values); finite(m) {
 		return m
@@ -381,9 +470,14 @@ type entry struct {
 // Run evaluates the candidates on y, chooses one and forecasts Horizon
 // periods with every candidate that went through the whole backtest.
 //
+// A candidate takes part only if it gives Horizon finite forecasts at every
+// origin and from the whole series; the others (those without a model, those
+// that fail, those that panic) are left out of the report.
+//
 // It returns [ErrFewOrigins] when the series is too short for at least one
-// pair at the longest horizon, and [ErrNoCandidate] when no candidate could
-// be fitted at every origin.
+// pair at the longest horizon, [ErrLevels] when a level is not above 0 and
+// below 1, and [ErrNoCandidate] when no candidate is left. There is no other
+// error.
 func (b Backtest) Run(y Series, candidates []Candidate) (*Report, error) {
 	b = b.filled()
 	n := y.Len()
@@ -391,14 +485,46 @@ func (b Backtest) Run(y Series, candidates []Candidate) (*Report, error) {
 	if origins < b.Horizon {
 		return nil, ErrFewOrigins
 	}
+	for _, level := range b.Levels {
+		if !(level > 0 && level < 1) {
+			return nil, ErrLevels
+		}
+	}
 	first := n - origins
+	usable := func(p []float64) bool {
+		if len(p) != b.Horizon {
+			return false
+		}
+		for _, v := range p {
+			if !finite(v) {
+				return false
+			}
+		}
+		return true
+	}
+	workers := threads(origins, b.Sequential)
+	// what a worker fits stays on its goroutine; with Sequential, everything
+	// stays on this one
+	atOrigin, whole := y, y
+	if workers > 1 || b.Sequential {
+		atOrigin = y.onOneGoroutine()
+	}
+	if b.Sequential {
+		whole = atOrigin
+	}
 
-	// 1. forecasts of every model at every origin
+	// 1. forecasts of every model at every origin, and from the whole series
+	//    (the last Window observations of it) with the parameters of that fit
 	var entries []entry
+	finals := map[int][]float64{}
+	params := map[int][]Param{}
 	for i, c := range candidates {
-		forecasts := mapIndices(origins, b.Sequential, func(k int) []float64 {
-			p, err := Forecast(c.Model, b.train(y, first+k), b.Horizon)
-			if err != nil || len(p) != b.Horizon {
+		if c.Model == nil {
+			continue
+		}
+		forecasts := mapIndices(origins, workers, func(k int) []float64 {
+			p, err := tryForecast(c.Model, b.train(atOrigin, first+k), b.Horizon)
+			if err != nil || !usable(p) {
 				return nil
 			}
 			return p
@@ -410,9 +536,15 @@ func (b Backtest) Run(y Series, candidates []Candidate) (*Report, error) {
 				break
 			}
 		}
-		if complete {
-			entries = append(entries, entry{[]int{i}, forecasts})
+		if !complete {
+			continue
 		}
+		forecast, fitted, err := tryFit(c.Model, b.train(whole, n), b.Horizon)
+		if err != nil || !usable(forecast) {
+			continue
+		}
+		finals[i], params[i] = forecast, fitted
+		entries = append(entries, entry{[]int{i}, forecasts})
 	}
 	if len(entries) == 0 {
 		return nil, ErrNoCandidate
@@ -420,8 +552,9 @@ func (b Backtest) Run(y Series, candidates []Candidate) (*Report, error) {
 	horizons := make([][]HorizonStats, len(entries))
 	scores := make([]float64, len(entries))
 	for i, e := range entries {
-		horizons[i] = b.stats(y, first, e.trajectories)
-		scores[i] = b.score(horizons[i])
+		var pairs []int
+		horizons[i], pairs = b.stats(y, first, e.trajectories)
+		scores[i] = b.score(horizons[i], pairs)
 	}
 
 	// 2. simple average of the best models
@@ -448,10 +581,10 @@ func (b Backtest) Run(y Series, candidates []Candidate) (*Report, error) {
 		for j, i := range best {
 			components[j] = entries[i].components[0]
 		}
-		stats := b.stats(y, first, trajectories)
+		stats, pairs := b.stats(y, first, trajectories)
 		entries = append(entries, entry{components, trajectories})
 		horizons = append(horizons, stats)
-		scores = append(scores, b.score(stats))
+		scores = append(scores, b.score(stats, pairs))
 	}
 
 	// 3. choice by the average error over the horizons
@@ -463,16 +596,6 @@ func (b Backtest) Run(y Series, candidates []Candidate) (*Report, error) {
 	}
 
 	// 4. forecast from the whole series, with each candidate's own bands
-	finals := map[int][]float64{}
-	params := map[int][]Param{}
-	for _, e := range entries[:singles] {
-		i := e.components[0]
-		fit, err := candidates[i].Model.Fit(y)
-		if err != nil {
-			return nil, err
-		}
-		finals[i], params[i] = fit.Forecast(b.Horizon), fit.Params()
-	}
 	reports := make([]CandidateReport, len(entries))
 	for j, e := range entries {
 		names := make([]string, len(e.components))

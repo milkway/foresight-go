@@ -52,9 +52,9 @@ semestre, _ := melhor.Cumulative(6)
 - Ensemble: média, mediana, pesos pelo inverso do erro ou pesos empilhados.
 - Limpeza: preenchimento de falhas e troca de valores atípicos.
 - Qualquer modelo na escala log ou Box-Cox.
-- Backtest por origem móvel em todos os núcleos, com MAPE, MAE, RMSE, MASE e
-  viés por horizonte, média dos melhores modelos e escolha pelo erro fora da
-  amostra.
+- Backtest por origem móvel em todos os núcleos (ou em quantos `SetMaxThreads`
+  permitir), com MAPE, MAE, RMSE, MASE e viés por horizonte, média dos melhores
+  modelos e escolha pelo erro fora da amostra.
 - Intervalos empíricos por horizonte e para totais acumulados.
 
 Os resultados são conferidos com o crate Rust (mesmos números) e com o pacote

@@ -14,7 +14,7 @@ import (
 // regressor) survive any Head, Tail or Slice.
 //
 // The values are not copied: a Series shares them with the slice it was made
-// from.
+// from. The zero Series{} is an empty series without seasonality.
 type Series struct {
 	values []float64
 	period int
@@ -22,6 +22,10 @@ type Series struct {
 	phase int
 	// absolute index of values[0]
 	start int
+	// set on a series handed to a worker of a parallel computation (or to a
+	// backtest that is not to go parallel): whatever is computed from it, and
+	// from its slices, stays on the calling goroutine
+	alone bool
 }
 
 // NewSeries returns a series with the given seasonal period; a period under 1
@@ -54,7 +58,7 @@ func mod(a, m int) int {
 
 // WithPhase sets the season of the first observation of this view.
 func (s Series) WithPhase(phase int) Series {
-	s.phase = mod(phase-s.start, s.period)
+	s.phase = mod(phase-s.start, s.Period())
 	return s
 }
 
@@ -64,8 +68,9 @@ func (s Series) Values() []float64 { return s.values }
 // Len returns the number of observations.
 func (s Series) Len() int { return len(s.values) }
 
-// Period returns the seasonal period.
-func (s Series) Period() int { return s.period }
+// Period returns the seasonal period: 1 for a series without seasonality,
+// the zero Series{} included.
+func (s Series) Period() int { return max(s.period, 1) }
 
 // Start returns the position, in the original data, of the first observation.
 func (s Series) Start() int { return s.start }
@@ -77,7 +82,7 @@ func (s Series) Index(i int) int { return s.start + i }
 // Season returns the season (0 to Period()-1) of observation i, which, like
 // in Index, may be past the end.
 func (s Series) Season(i int) int {
-	return mod(s.phase+s.start+i, s.period)
+	return mod(s.phase+s.start+i, s.Period())
 }
 
 // Head returns the first n observations (all of them if n is larger).
@@ -110,6 +115,20 @@ func (s Series) WithValues(values []float64) (Series, error) {
 	}
 	s.values = values
 	return s, nil
+}
+
+// flat returns other values at the same position, without seasonality: what
+// is left of this series once its seasonal patterns are taken out. Models
+// that go by position (regressors, events, a deflator) stay aligned.
+func (s Series) flat(values []float64) Series {
+	return Series{values: values, period: 1, start: s.start, alone: s.alone}
+}
+
+// onOneGoroutine returns the series marked for computations that must not
+// start goroutines of their own.
+func (s Series) onOneGoroutine() Series {
+	s.alone = true
+	return s
 }
 
 func finite(v float64) bool {

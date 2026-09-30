@@ -91,7 +91,7 @@ A model of your own joins the backtest by implementing `Model`.
 | `Transformed` | any model on the log or another Box-Cox scale (`Log`, `WithBoxCox`, `WithGuerrero`) |
 | `Regressors` | external variables aligned with the data, `Fourier` terms, `SeasonalDummies` |
 | `Defaults`, `Thorough` | ready sets of candidates: the models that fit in a moment, and those plus the automatic choices and the ensembles |
-| `Backtest` | rolling origin (expanding or fixed window) on all cores; MAPE, MAE, RMSE, MASE and bias by horizon; average of the best models; choice by out-of-sample error |
+| `Backtest` | rolling origin (expanding or fixed window) on all cores, or on as many as `SetMaxThreads` allows; MAPE, MAE, RMSE, MASE and bias by horizon; average of the best models; choice by out-of-sample error |
 | Intervals | empirical quantiles of the backtest errors, by horizon and for cumulative totals |
 | Measures and tests | `MAPE`, `Bias`, `MAE`, `RMSE`, `MASE`, `Quantile`, `ACF`, `KPSS`, `NDiffs`, `NSDiffs`, `SeasonalStrength` |
 
@@ -131,6 +131,10 @@ crate is in turn compared with the R packages `forecast` and `prophet`.
 ## Status
 
 Early: the API may change before 1.0.
+
+## Changes
+
+See [CHANGELOG.md](CHANGELOG.md).
 
 ## Development
 

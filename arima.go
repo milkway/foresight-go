@@ -38,10 +38,13 @@ const (
 // For series whose swings grow with the level, fit on the log scale with
 // [Log].
 type Arima struct {
+	// P, D and Q are the orders of the autoregression, of the differences
+	// and of the moving average; none may be negative.
 	P, D, Q int
 	// Seasonal orders, ignored for series without seasonality.
 	SeasonalP, SeasonalD, SeasonalQ int
-	Constant                        Constant
+	// Constant says whether a mean or a drift is estimated.
+	Constant Constant
 	// Regressors are external variables, with rows for the history and for
 	// the periods to forecast. The zero value is none.
 	Regressors Regressors
@@ -56,6 +59,14 @@ func Airline() Arima {
 // ErrRegressors is returned when the regressors do not cover the history or
 // the horizon, or cannot be told apart from each other or from the constant.
 var ErrRegressors = errors.New("foresight: regressors do not cover the series or are collinear")
+
+// valid reports whether no order is negative and the constant is one of the
+// named choices.
+func (a Arima) valid() bool {
+	return a.P >= 0 && a.D >= 0 && a.Q >= 0 &&
+		a.SeasonalP >= 0 && a.SeasonalD >= 0 && a.SeasonalQ >= 0 &&
+		a.Constant >= ConstantByDefault && a.Constant <= WithoutConstant
+}
 
 func (a Arima) differences() int { return a.D + a.SeasonalD }
 
@@ -180,7 +191,11 @@ type ArimaFit struct {
 	Regression []Param
 	// Sigma2 is the innovation variance (maximum likelihood, not corrected
 	// for degrees of freedom).
-	Sigma2        float64
+	Sigma2 float64
+	// LogLikelihood is the Gaussian log-likelihood; AIC, AICc and BIC are
+	// the information criteria that come from it. For an exact fit, whose
+	// likelihood has no bound, a very large number stands for it, so the
+	// criteria stay finite and comparable.
 	LogLikelihood float64
 	AIC           float64
 	AICc          float64
@@ -197,7 +212,9 @@ type ArimaFit struct {
 	next int
 }
 
-// Estimate fits the model and returns everything that was estimated.
+// Estimate fits the model and returns everything that was estimated. It
+// returns [ErrConfig] for a negative order or a Constant that is not one of
+// the named choices.
 func (a Arima) Estimate(y Series) (*ArimaFit, error) {
 	return a.estimateFrom(y, nil)
 }
@@ -205,6 +222,9 @@ func (a Arima) Estimate(y Series) (*ArimaFit, error) {
 // estimateFrom is Estimate, or a quicker search from a neighbouring model
 // when one is given, which is enough to compare models.
 func (a Arima) estimateFrom(y Series, near *ArimaFit) (*ArimaFit, error) {
+	if !a.valid() {
+		return nil, ErrConfig
+	}
 	m := y.Period()
 	spec := a.forPeriod(m)
 	if !y.IsFinite() {
@@ -310,13 +330,15 @@ func (a Arima) estimateFrom(y Series, near *ArimaFit) (*ArimaFit, error) {
 		}
 		return evaluation{sigma2, f.logDet, beta, centred, f.errors}, true
 	}
+	// a fit is exact when what is left is rounding noise next to the data
+	exact := 1e-20 * dot(w, w) / float64(n)
 	// −2 log likelihood with the variance concentrated out, up to a constant
 	objective := func(u []float64) float64 {
 		e, ok := evaluate(u)
 		switch {
 		case !ok:
 			return math.Inf(1)
-		case e.sigma2 > 0:
+		case e.sigma2 > exact:
 			return float64(n)*math.Log(e.sigma2) + e.logDet
 		}
 		// a perfect fit: nothing left to explain
@@ -344,8 +366,11 @@ func (a Arima) estimateFrom(y Series, near *ArimaFit) (*ArimaFit, error) {
 	parts := build(u)
 	nf := float64(n)
 	k := float64(coefficients + width + 1)
-	logLikelihood := math.Inf(1)
-	if e.sigma2 > 0 {
+	// for an exact fit the likelihood has no bound: a very large number
+	// stands for it, as in exponential smoothing, so the criteria stay
+	// finite and comparable
+	logLikelihood := 0.5e300
+	if e.sigma2 > exact {
 		logLikelihood = -0.5 * (nf*math.Log(2*math.Pi*e.sigma2) + e.logDet + nf)
 	}
 	aic := -2*logLikelihood + 2*k
@@ -392,8 +417,12 @@ func (f *ArimaFit) IsWellBehaved(margin float64) bool {
 }
 
 // ForecastVariance returns the variance of the forecast error 1 to h periods
-// ahead, on the scale the model was fitted on.
+// ahead, on the scale the model was fitted on. It returns nothing for an h
+// of zero or less, or for a fit that did not come from [Arima.Estimate].
 func (f *ArimaFit) ForecastVariance(h int) []float64 {
+	if h <= 0 || f == nil || len(f.delta) == 0 {
+		return nil
+	}
 	// ψ weights of the model with the differences put back
 	ar := append([]float64{1}, negate(f.arma.phi)...)
 	full := make([]float64, len(ar)+len(f.delta)-1)
@@ -414,8 +443,12 @@ func (f *ArimaFit) ForecastVariance(h int) []float64 {
 
 // Forecast returns the forecasts for the h periods after the last
 // observation. Where the regressors have no value for a period, the forecast
-// is not a number.
+// is not a number. It returns nothing for an h of zero or less, or for a fit
+// that did not come from [Arima.Estimate].
 func (f *ArimaFit) Forecast(h int) []float64 {
+	if h <= 0 || f == nil || len(f.delta) == 0 {
+		return nil
+	}
 	n := len(f.centred)
 	differenced := make([]float64, h)
 	if inn, ok := f.arma.innovate(n + max(h-1, 0)); ok {
@@ -483,6 +516,7 @@ func (f *ArimaFit) Params() []Param {
 	return p
 }
 
+// Name is the identifier of the model, with its orders.
 func (a Arima) Name() string {
 	name := "arima_" + strconv.Itoa(a.P) + strconv.Itoa(a.D) + strconv.Itoa(a.Q)
 	if a.SeasonalP+a.SeasonalD+a.SeasonalQ > 0 {
@@ -494,6 +528,7 @@ func (a Arima) Name() string {
 	return name
 }
 
+// Description is a one-line description of the model.
 func (a Arima) Description() string {
 	d := "ARIMA(" + strconv.Itoa(a.P) + "," + strconv.Itoa(a.D) + "," + strconv.Itoa(a.Q) + ")"
 	if a.SeasonalP+a.SeasonalD+a.SeasonalQ > 0 {
@@ -506,6 +541,7 @@ func (a Arima) Description() string {
 	return d
 }
 
+// Fit estimates the model; see [Arima.Estimate].
 func (a Arima) Fit(y Series) (Fitted, error) {
 	fit, err := a.Estimate(y)
 	if err != nil {

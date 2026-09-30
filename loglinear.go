@@ -48,6 +48,9 @@ func logLinearRow(t, season int, center float64, m int) []float64 {
 }
 
 func (f logLinearFit) Forecast(h int) []float64 {
+	if h <= 0 {
+		return nil
+	}
 	m := f.period
 	base, inflation := 1.0, 1.0
 	if f.deflated {
@@ -75,6 +78,7 @@ func (f logLinearFit) Params() []Param {
 	return p
 }
 
+// Name is the identifier of the model.
 func (l LogLinear) Name() string {
 	if l.Deflator != nil {
 		return "log_linear_deflated"
@@ -82,6 +86,7 @@ func (l LogLinear) Name() string {
 	return "log_linear"
 }
 
+// Description is a one-line description of the model.
 func (l LogLinear) Description() string {
 	if l.Deflator != nil {
 		return "Log-linear regression at constant prices, re-inflated by the index growth of the last cycle"
@@ -89,6 +94,8 @@ func (l LogLinear) Description() string {
 	return "Log-linear regression: trend plus seasonal dummies"
 }
 
+// Fit estimates the model; it needs three full cycles of positive values
+// and, with a deflator, an index that reaches the end of the series.
 func (l LogLinear) Fit(y Series) (Fitted, error) {
 	v, m, n := y.Values(), y.Period(), y.Len()
 	if !y.IsPositive() {

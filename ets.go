@@ -19,7 +19,9 @@ const (
 type Trend int
 
 const (
+	// NoTrend: the level alone.
 	NoTrend Trend = iota
+	// AdditiveTrend: a slope added at every period.
 	AdditiveTrend
 	// DampedTrend is additive, flattening out over the horizon.
 	DampedTrend
@@ -29,9 +31,12 @@ const (
 type Season int
 
 const (
+	// NoSeason: no seasonal pattern.
 	NoSeason Season = iota
+	// AdditiveSeason: a pattern added to the level.
 	AdditiveSeason
-	// MultiplicativeSeason needs positive values.
+	// MultiplicativeSeason: a pattern that multiplies the level; needs
+	// positive values.
 	MultiplicativeSeason
 )
 
@@ -45,9 +50,18 @@ const (
 // smoothing parameters and the initial states are estimated together by
 // maximum likelihood.
 type Ets struct {
+	// Error, Trend and Season are the three components; the zero value of
+	// each is the plain one (additive error, no trend, no season).
 	Error  ErrorKind
 	Trend  Trend
 	Season Season
+}
+
+// valid reports whether each component is one of the named ones.
+func (e Ets) valid() bool {
+	return e.Error >= AdditiveError && e.Error <= MultiplicativeError &&
+		e.Trend >= NoTrend && e.Trend <= DampedTrend &&
+		e.Season >= NoSeason && e.Season <= MultiplicativeSeason
 }
 
 // EtsFromCode returns the model of the usual three-letter code,
@@ -85,8 +99,12 @@ func EtsFromCode(code string) (Ets, bool) {
 	return e, true
 }
 
-// Code returns the three-letter code of the model.
+// Code returns the three-letter code of the model; "invalid" when a
+// component is not one of the named ones.
 func (e Ets) Code() string {
+	if !e.valid() {
+		return "invalid"
+	}
 	code := "A"
 	if e.Error == MultiplicativeError {
 		code = "M"
@@ -295,7 +313,8 @@ type EtsFit struct {
 	// multiplicative models).
 	Sigma2 float64
 	// LogLikelihood is the log-likelihood up to the usual constant, as
-	// reported by ets in R.
+	// reported by ets in R; AIC, AICc and BIC are the information criteria
+	// that come from it.
 	LogLikelihood float64
 	AIC           float64
 	AICc          float64
@@ -307,8 +326,12 @@ type EtsFit struct {
 	Fitted []float64
 }
 
-// Estimate fits the model and returns everything that was estimated.
+// Estimate fits the model and returns everything that was estimated. It
+// returns [ErrConfig] when a component is not one of the named ones.
 func (e Ets) Estimate(y Series) (*EtsFit, error) {
+	if !e.valid() {
+		return nil, ErrConfig
+	}
 	m := y.Period()
 	spec := e.forPeriod(m)
 	multiplicative := spec.Error == MultiplicativeError || spec.Season == MultiplicativeSeason
@@ -501,7 +524,13 @@ func (f *EtsFit) LevelAndTrend() (level, trend float64) {
 	return f.last.level, f.last.trend
 }
 
+// Forecast returns the forecasts for the h periods after the last
+// observation; nothing for an h of zero or less, or for a fit that did not
+// come from [Ets.Estimate].
 func (f *EtsFit) Forecast(h int) []float64 {
+	if h <= 0 || f == nil || f.n == 0 {
+		return nil
+	}
 	m := max(f.period, 1)
 	damp, pow := 0.0, 1.0
 	out := make([]float64, h)
@@ -521,6 +550,8 @@ func (f *EtsFit) Forecast(h int) []float64 {
 	return out
 }
 
+// Params returns the smoothing parameters, the initial states, the
+// components and the fit.
 func (f *EtsFit) Params() []Param {
 	p := []Param{{"alpha", f.Alpha}}
 	if f.spec.hasTrend() {
@@ -547,14 +578,21 @@ func (f *EtsFit) Params() []Param {
 	)
 }
 
+// Name is the identifier of the model, after its code; "ets_invalid" when a
+// component is not one of the named ones.
 func (e Ets) Name() string { return "ets_" + strings.ToLower(e.Code()) }
 
+// Description is a one-line description of the model.
 func (e Ets) Description() string {
+	if !e.valid() {
+		return "Exponential smoothing with an invalid component"
+	}
 	code := e.Code()
 	return "Exponential smoothing ETS(" + code[:1] + "," + code[1:len(code)-1] + "," +
 		code[len(code)-1:] + ") by maximum likelihood"
 }
 
+// Fit estimates the model; see [Ets.Estimate].
 func (e Ets) Fit(y Series) (Fitted, error) {
 	fit, err := e.Estimate(y)
 	if err != nil {
@@ -568,18 +606,21 @@ func (e Ets) Fit(y Series) (Fitted, error) {
 //
 // Every combination of error, trend (none, additive, damped) and season
 // (none, additive, multiplicative) is fitted, leaving out the ones with
-// multiplicative parts when the series has values that are not positive, and
+// multiplicative parts when the series has values that are not positive,
 // additive errors with a multiplicative season, whose forecast variance is
-// unbounded.
+// unbounded, and the seasonal ones when the period is over 24, which would
+// take one state per position of the cycle.
 //
 // As a [Model], the choice is made again at every fit, so a backtest judges
 // the whole procedure.
 type AutoEts struct {
+	// Criterion ranks the models (default ByAICc).
 	Criterion Criterion
 }
 
 // EtsCandidates returns the models considered for a series of the given
-// period.
+// period, with or without values that are not positive. Seasonal models are
+// left out for a period under 2 or over 24.
 func EtsCandidates(period int, positive bool) []Ets {
 	var out []Ets
 	for _, e := range []ErrorKind{AdditiveError, MultiplicativeError} {
@@ -625,11 +666,15 @@ func (a AutoEts) Select(y Series) (*EtsFit, error) {
 	return best, nil
 }
 
+// Name is the identifier of the model.
 func (AutoEts) Name() string { return "auto_ets" }
+
+// Description is a one-line description of the model.
 func (AutoEts) Description() string {
 	return "Exponential smoothing with error, trend and season chosen by the information criterion"
 }
 
+// Fit chooses the model and estimates it; see [AutoEts.Select].
 func (a AutoEts) Fit(y Series) (Fitted, error) {
 	fit, err := a.Select(y)
 	if err != nil {
