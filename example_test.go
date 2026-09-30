@@ -78,3 +78,56 @@ func ExampleCandidate() {
 	// same_month: MAPE 6.6%
 	// log_linear: MAPE 3.3%
 }
+
+// Seasonal ARIMA on the log scale, the model that does best on many monthly
+// series.
+func ExampleAirline() {
+	model := foresight.Log(foresight.Airline())
+	fit, err := model.Fit(foresight.Monthly(sales(), 0))
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println(model.Name())
+	for _, v := range fit.Forecast(3) {
+		fmt.Printf("%.0f\n", v)
+	}
+	// Output:
+	// log_arima_011_011
+	// 164
+	// 121
+	// 137
+}
+
+// A trend that bends, with an event that recurs and is known ahead.
+func ExampleProphet() {
+	y := sales()
+	for _, t := range []int{5, 29, 53, 77} {
+		y[t] += 30 // a campaign every other June
+	}
+	model := foresight.Prophet{Events: []foresight.Event{
+		{Name: "campaign", Positions: []int{5, 29, 53, 77, 101}},
+	}}
+	fit, err := model.Estimate(foresight.Monthly(y, 0))
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	for _, e := range fit.Effects() {
+		fmt.Printf("%s: %+.0f\n", e.Name, e.Value)
+	}
+	// Output:
+	// campaign: +29
+}
+
+// The member of the exponential smoothing family that suits the series best.
+func ExampleAutoEts() {
+	fit, err := foresight.AutoEts{}.Select(foresight.Monthly(sales(), 0))
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Printf("ETS(%s)\n", fit.Model().Code())
+	// Output:
+	// ETS(MAM)
+}

@@ -48,8 +48,14 @@ type Fitted interface {
 }
 
 // Forecast fits the model and forecasts the h periods after the last
-// observation.
+// observation. A model with regressors that do not reach the horizon gives
+// an error rather than a forecast that is not a number.
 func Forecast(m Model, y Series, h int) ([]float64, error) {
+	if c, ok := m.(interface{ covers(Series, int) error }); ok {
+		if err := c.covers(y, h); err != nil {
+			return nil, err
+		}
+	}
 	fit, err := m.Fit(y)
 	if err != nil {
 		return nil, err

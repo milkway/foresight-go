@@ -518,5 +518,9 @@ func Defaults() []Candidate {
 		NewCandidate(Theta{}),
 		NewCandidate(HoltWinters{}),
 		NewCandidate(LogLinear{}),
+		NewCandidate(Airline()),
+		NewCandidate(Log(Airline())),
+		NewCandidate(Prophet{}),
+		NewCandidate(Log(Prophet{})),
 	}
 }

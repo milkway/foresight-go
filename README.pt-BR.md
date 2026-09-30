@@ -42,8 +42,11 @@ semestre, _ := melhor.Cumulative(6)
 
 ## O que tem
 
-- Modelos: média, ingênuo, tendência, sazonal ingênuo, Theta, Holt-Winters e
-  regressão log-linear (com deflator opcional).
+- Modelos: média, ingênuo, tendência, sazonal ingênuo, Theta, Holt-Winters,
+  regressão log-linear (com deflator opcional), ARIMA sazonal por máxima
+  verossimilhança exata (com regressores), ARIMA automático, família ETS com
+  escolha automática e Prophet (quebras de tendência, eventos e degraus).
+- Qualquer modelo na escala log ou Box-Cox.
 - Backtest por origem móvel em todos os núcleos, com MAPE, MAE, RMSE, MASE e
   viés por horizonte, média dos melhores modelos e escolha pelo erro fora da
   amostra.

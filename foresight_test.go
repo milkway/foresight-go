@@ -287,8 +287,51 @@ func TestBacktestEdges(t *testing.T) {
 	}
 	// quarterly data with the default candidates
 	q := noisySeasonalGrowth(80, 0.05)
-	r, err = Backtest{Origins: 12, Horizon: 4, MinTrain: 24}.Run(Quarterly(q, 0), Defaults())
+	r, err = Backtest{Origins: 12, Horizon: 4, MinTrain: 32}.Run(Quarterly(q, 0), Defaults())
 	if err != nil || len(r.Candidates) != len(Defaults())+1 || len(r.Best().Forecast) != 4 {
 		t.Errorf("quarterly %v", err)
+	}
+}
+
+func TestNewModelsRefuseWhatDoesNotSuitThem(t *testing.T) {
+	short := Monthly(seasonalGrowth(30), 0)
+	if _, err := Airline().Estimate(short); !errors.Is(err, ErrTooShort) {
+		t.Error("airline on 30 months")
+	}
+	negative := Monthly([]float64{1, -2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28}, 0)
+	mam, _ := EtsFromCode("MAM")
+	if _, err := mam.Estimate(negative); !errors.Is(err, ErrNotPositive) {
+		t.Error("multiplicative model on values that are not positive")
+	}
+	if _, err := Log(Naive{}).Fit(negative); !errors.Is(err, ErrNotPositive) {
+		t.Error("logarithm of values that are not positive")
+	}
+	if _, err := (Prophet{}).Estimate(NonSeasonal([]float64{1, 2, 3})); !errors.Is(err, ErrTooShort) {
+		t.Error("prophet on three observations")
+	}
+	for _, bad := range []string{"", "A", "AN", "XNN", "AXN", "ANX", "ANNN", "AdNN"} {
+		if _, ok := EtsFromCode(bad); ok {
+			t.Errorf("code %q accepted", bad)
+		}
+	}
+	if len(EtsCandidates(12, true)) != 15 || len(EtsCandidates(12, false)) != 6 || len(EtsCandidates(1, true)) != 6 {
+		t.Error("candidates of the automatic choice")
+	}
+	if n := (Transformed{Model: Drift{}, Automatic: true}).Name(); n != "boxcox_drift" || Log(Airline()).Name() != "log_arima_011_011" {
+		t.Errorf("names %s", n)
+	}
+	// a straight line stays straight, and a drift in logs is geometric growth
+	y := make([]float64, 40)
+	for i := range y {
+		y[i] = 5 * math.Pow(1.03, float64(i))
+	}
+	for k, v := range must(t, Log(Drift{}), NonSeasonal(y), 5) {
+		if math.Abs(v/(5*math.Pow(1.03, float64(40+k)))-1) > 1e-9 {
+			t.Errorf("h=%d", k+1)
+		}
+	}
+	x := Regressors{}.With("a", []float64{1, 2, 3}).And(Regressors{}.With("b", []float64{1, math.NaN(), 3, 4}))
+	if x.Width() != 2 || x.Rows() != 3 || !x.Covers(1) || x.Covers(2) || SeasonalDummies(4, 9).Width() != 3 || Fourier(12, 6, 36).Width() != 11 {
+		t.Error("regressors")
 	}
 }

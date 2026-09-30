@@ -262,10 +262,10 @@ y := foresight.<span class="c-cmd">Monthly</span>(values, <span class="c-flag">2
 report, err := foresight.<span class="c-cmd">DefaultBacktest</span>().
     <span class="c-cmd">Run</span>(y, foresight.<span class="c-cmd">Defaults</span>())
 
-<span class="c-cmt">// 36 origins · 12 months ahead · 7 models</span>
-<span class="c-ok">log_linear</span>             MAPE <span class="c-ok">5.54%</span>
+<span class="c-cmt">// 36 origins · 12 months ahead · 11 models</span>
+<span class="c-ok">mean(log_arima+arima)</span>  MAPE <span class="c-ok">3.43%</span>
+log_linear             MAPE 5.54%
 holt_winters           MAPE 7.29%
-theta                  MAPE 7.50%
 seasonal_naive         MAPE 11.45%</code></pre>
       </div>
     </div>
@@ -289,18 +289,18 @@ seasonal_naive         MAPE 11.45%</code></pre>
   <section id="models">
     <div class="wrap">
       <h2>Models</h2>
-      <p class="sub">The yardsticks every model must beat, and the models that usually beat them.</p>
+      <p class="sub">From the yardsticks every model must beat to the exponential smoothing family, seasonal ARIMA with automatic orders and Prophet with dated events. Any of them can run on the log or another Box-Cox scale.</p>
       <div class="pills">
-        <span class="pill">Mean</span><span class="pill">Naive</span><span class="pill">Drift</span><span class="pill">SeasonalNaive</span><span class="pill">Theta</span><span class="pill">HoltWinters</span><span class="pill">LogLinear</span>
+        <span class="pill">Mean</span><span class="pill">Naive</span><span class="pill">Drift</span><span class="pill">SeasonalNaive</span><span class="pill">Theta</span><span class="pill">HoltWinters</span><span class="pill">LogLinear</span><span class="pill">Arima</span><span class="pill">AutoArima</span><span class="pill">Ets</span><span class="pill">AutoEts</span><span class="pill">Prophet</span><span class="pill">Transformed</span><span class="pill">Regressors</span>
       </div>
-      <p class="note">This is the Go edition of the Rust crate <a href="https://milkway.github.io/foresight/">foresight</a>, which also has seasonal ARIMA, the exponential smoothing family, Prophet, TBATS, STL, regressors and ensembles. A model of your own is one interface away: implement <code>Model</code> and it joins the backtest.</p>
+      <p class="note">This is the Go edition of the Rust crate <a href="https://milkway.github.io/foresight/">foresight</a>, which also has TBATS, STL, intermittent demand, data cleaning and ensembles. ARIMA is estimated by exact Gaussian maximum likelihood with the innovations algorithm; Prophet is fitted without Stan, its changepoints that do not matter coming out as exactly zero. A model of your own is one interface away: implement <code>Model</code> and it joins the backtest.</p>
     </div>
   </section>
 
   <section id="example" class="alt">
     <div class="wrap">
       <h2>On real data</h2>
-      <p class="sub">Monthly ICMS, the sales tax of the Brazilian state of Piauí, from public fiscal reports. The log-linear regression had a mean absolute percentage error of 5.5% over 36 origins and 12 horizons; the seasonal naive forecast had 11.5%.</p>
+      <p class="sub">Monthly ICMS, the sales tax of the Brazilian state of Piauí, from public fiscal reports. The average of two seasonal ARIMA models, on the log and on the original scale, had a mean absolute percentage error of 3.4% over 36 origins and 12 horizons; the seasonal naive forecast had 11.5%.</p>
       <div class="viz">
         <h3>ICMS revenue, Piauí: last four years and the next twelve months</h3>
         <p class="cap">BRL million per month. Forecast from data up to June 2026, with the 80% empirical interval.</p>
@@ -313,7 +313,7 @@ seasonal_naive         MAPE 11.45%</code></pre>
         <details class="tbl">
           <summary>Forecast as a table</summary>
           <div class="scroll"><table class="data" id="table"><thead><tr><th>Month</th><th>Forecast</th><th>Lower (80%)</th><th>Upper (80%)</th></tr></thead><tbody></tbody></table></div>
-          <p class="note">Total of the next six months: BRL 5.03 billion, 80% interval 4.94 to 5.57 billion. Adding up the six monthly limits instead would give a wider and wrong interval.</p>
+          <p class="note">Total of the next six months: BRL 5.02 billion, 80% interval 4.88 to 5.25 billion. Adding up the six monthly limits instead would give a wider and wrong interval.</p>
         </details>
       </div>
       <p class="note">Source: Siconfi/STN, RREO Anexo 03. The data is in <code>testdata/</code> of the repository.</p>
@@ -391,6 +391,7 @@ report, err := foresight.<span class="c-ty">Backtest</span>{
           <thead><tr><th>Against</th><th>What</th><th>Agreement</th></tr></thead>
           <tbody>
             <tr><td>Rust crate</td><td>Backtest of four models on two public series: errors and bias by horizon, quantiles, forecasts, intervals and the choice</td><td>The same numbers (relative difference under 10⁻⁹)</td></tr>
+            <tr><td>Rust crate</td><td>Prophet, ARIMA, regression with ARIMA errors, ETS, automatic orders, tests of stationarity and seasonality</td><td>The same likelihood and the same models chosen; forecasts within the precision of the search</td></tr>
             <tr><td>R, <code>forecast</code></td><td>Seasonal naive, random walk with drift</td><td>Exact</td></tr>
             <tr><td>R, <code>forecast</code></td><td>Theta</td><td>Forecasts within 0.1%</td></tr>
           </tbody>
@@ -398,7 +399,7 @@ report, err := foresight.<span class="c-ty">Backtest</span>{
       </div>
       <div class="grid f3" style="margin-top:18px">
         <div class="card"><div class="ic">✅</div><h3>CI on every platform</h3><p>gofmt · go vet · tests on Linux, macOS and Windows, with Go 1.22 and the current release.</p></div>
-        <div class="card"><div class="ic">📄</div><h3>From the papers</h3><p>Assimakopoulos &amp; Nikolopoulos, Hyndman &amp; Billah, Holt and Winters, Duan. R supplies reference numbers only.</p></div>
+        <div class="card"><div class="ic">📄</div><h3>From the papers</h3><p>Box &amp; Jenkins, Brockwell &amp; Davis, Hyndman &amp; Khandakar, Taylor &amp; Letham, Assimakopoulos &amp; Nikolopoulos, Guerrero. R supplies reference numbers only.</p></div>
         <div class="card"><div class="ic">⚖️</div><h3>MIT, nothing attached</h3><p>With no dependencies there is no license to reconcile and no supply chain to watch.</p></div>
       </div>
     </div>
@@ -419,14 +420,14 @@ report, err := foresight.<span class="c-ty">Backtest</span>{
 
 <script>
 (() => {
-  const DATA = {"actual": [["2022-07", 518.5], ["2022-08", 472.8], ["2022-09", 477.5], ["2022-10", 450.0], ["2022-11", 486.6], ["2022-12", 460.8], ["2023-01", 487.1], ["2023-02", 472.8], ["2023-03", 405.4], ["2023-04", 507.9], ["2023-05", 545.5], ["2023-06", 598.3], ["2023-07", 580.7], ["2023-08", 615.6], ["2023-09", 601.2], ["2023-10", 601.4], ["2023-11", 632.7], ["2023-12", 680.8], ["2024-01", 686.7], ["2024-02", 554.6], ["2024-03", 543.5], ["2024-04", 598.9], ["2024-05", 592.1], ["2024-06", 627.5], ["2024-07", 680.1], ["2024-08", 664.9], ["2024-09", 661.2], ["2024-10", 656.8], ["2024-11", 693.2], ["2024-12", 754.4], ["2025-01", 670.6], ["2025-02", 619.9], ["2025-03", 591.0], ["2025-04", 660.9], ["2025-05", 662.7], ["2025-06", 734.9], ["2025-07", 725.0], ["2025-08", 773.3], ["2025-09", 748.0], ["2025-10", 751.2], ["2025-11", 772.0], ["2025-12", 767.2], ["2026-01", 791.8], ["2026-02", 720.1], ["2026-03", 679.8], ["2026-04", 774.0], ["2026-05", 704.8], ["2026-06", 785.7]], "forecast": [["2026-07", 796.4, 765.8, 892.2], ["2026-08", 822.9, 790.3, 926.6], ["2026-09", 833.6, 803.1, 925.5], ["2026-10", 828.5, 799.6, 923.7], ["2026-11", 871.5, 844.6, 973.7], ["2026-12", 879.2, 857.4, 987.8], ["2027-01", 890.2, 866.2, 994.8], ["2027-02", 797.6, 777.6, 894.2], ["2027-03", 735.5, 722.9, 827.8], ["2027-04", 820.7, 811.8, 925.2], ["2027-05", 822.5, 811.5, 933.0], ["2027-06", 897.0, 884.8, 1013.5]]};
+  const DATA = {"actual": [["2022-07", 518.5], ["2022-08", 472.8], ["2022-09", 477.5], ["2022-10", 450.0], ["2022-11", 486.6], ["2022-12", 460.8], ["2023-01", 487.1], ["2023-02", 472.8], ["2023-03", 405.4], ["2023-04", 507.9], ["2023-05", 545.5], ["2023-06", 598.3], ["2023-07", 580.7], ["2023-08", 615.6], ["2023-09", 601.2], ["2023-10", 601.4], ["2023-11", 632.7], ["2023-12", 680.8], ["2024-01", 686.7], ["2024-02", 554.6], ["2024-03", 543.5], ["2024-04", 598.9], ["2024-05", 592.1], ["2024-06", 627.5], ["2024-07", 680.1], ["2024-08", 664.9], ["2024-09", 661.2], ["2024-10", 656.8], ["2024-11", 693.2], ["2024-12", 754.4], ["2025-01", 670.6], ["2025-02", 619.9], ["2025-03", 591.0], ["2025-04", 660.9], ["2025-05", 662.7], ["2025-06", 734.9], ["2025-07", 725.0], ["2025-08", 773.3], ["2025-09", 748.0], ["2025-10", 751.2], ["2025-11", 772.0], ["2025-12", 767.2], ["2026-01", 791.8], ["2026-02", 720.1], ["2026-03", 679.8], ["2026-04", 774.0], ["2026-05", 704.8], ["2026-06", 785.7]], "forecast": [["2026-07", 808.8, 769.5, 851.6], ["2026-08", 820.3, 770.5, 879.0], ["2026-09", 824.3, 785.7, 880.5], ["2026-10", 846.9, 802.2, 907.7], ["2026-11", 845.9, 811.9, 894.4], ["2026-12", 874.5, 831.3, 929.8], ["2027-01", 877.7, 842.0, 941.2], ["2027-02", 788.7, 755.3, 834.1], ["2027-03", 747.9, 723.7, 801.1], ["2027-04", 812.9, 792.0, 858.2], ["2027-05", 782.1, 768.0, 827.9], ["2027-06", 854.2, 838.2, 908.8]]};
   const NS = "http://www.w3.org/2000/svg";
   const W = 960, H = 380, M = { top: 16, right: 64, bottom: 34, left: 52 };
   const plot = document.getElementById("plot"), tip = document.getElementById("tip");
   const points = DATA.actual.map(([m, v]) => ({ m, actual: v }))
     .concat(DATA.forecast.map(([m, f, lo, hi]) => ({ m, forecast: f, lo, hi })));
   const n = points.length, nA = DATA.actual.length;
-  const top = 1100, bottom = 400;
+  const top = 1000, bottom = 400;
   const x = i => M.left + (W - M.left - M.right) * i / (n - 1);
   const y = v => M.top + (H - M.top - M.bottom) * (top - v) / (top - bottom);
   const el = (name, attrs, parent) => {

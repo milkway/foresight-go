@@ -56,8 +56,24 @@ halfYear, _ := best.Cumulative(6)
 One model on its own:
 
 ```go
-fit, err := foresight.Theta{}.Fit(foresight.NonSeasonal(values))
-next := fit.Forecast(3)
+// seasonal ARIMA on the log scale
+fit, err := foresight.Log(foresight.Airline()).Fit(y)
+nextYear := fit.Forecast(12)
+
+// orders chosen from the data, inspected
+auto, err := foresight.AutoArima{}.Select(foresight.Monthly(logValues, 2))
+fmt.Println(auto.Order())
+```
+
+A trend that bends, with dated events:
+
+```go
+model := foresight.Prophet{Events: []foresight.Event{
+	{Name: "campaign", Positions: []int{10, 34, 58, 82, 106, 130}}, // future ones included
+	{Name: "new_law", Step: true, StepFrom: 80},                     // a lasting change of level
+}}
+fit, err := model.Estimate(y)
+fmt.Println(fit.Changepoints(), fit.Effects())
 ```
 
 A model of your own joins the backtest by implementing `Model`.
@@ -68,14 +84,15 @@ A model of your own joins the backtest by implementing `Model`.
 |---|---|
 | `Series` | values + seasonal period; slices keep season and position |
 | `Model` / `Fitted` | fit once, forecast any horizon, inspect parameters |
-| Models | `Mean`, `Naive`, `Drift`, `SeasonalNaive`, `Theta`, `HoltWinters`, `LogLinear` (optionally deflated by a price index) |
+| Models | `Mean`, `Naive`, `Drift`, `SeasonalNaive`, `Theta`, `HoltWinters`, `LogLinear` (optionally deflated by a price index), `Arima` (seasonal, exact maximum likelihood, optionally with regressors), `AutoArima` (differences by tests, orders by stepwise search), `Ets` (the exponential smoothing family in state space form), `AutoEts`, `Prophet` (trend with changepoints, Fourier seasonality, dated events and steps) |
+| `Transformed` | any model on the log or another Box-Cox scale (`Log`, `WithBoxCox`, `WithGuerrero`) |
+| `Regressors` | external variables aligned with the data, `Fourier` terms, `SeasonalDummies` |
 | `Backtest` | rolling origin (expanding or fixed window) on all cores; MAPE, MAE, RMSE, MASE and bias by horizon; average of the best models; choice by out-of-sample error |
 | Intervals | empirical quantiles of the backtest errors, by horizon and for cumulative totals |
-| Measures | `MAPE`, `Bias`, `MAE`, `RMSE`, `MASE`, `Quantile`, `ACF` |
+| Measures and tests | `MAPE`, `Bias`, `MAE`, `RMSE`, `MASE`, `Quantile`, `ACF`, `KPSS`, `NDiffs`, `NSDiffs`, `SeasonalStrength` |
 
-The Rust crate has more: seasonal ARIMA with automatic orders, the exponential
-smoothing family, Prophet, TBATS, STL and MSTL, regression with ARIMA errors,
-intermittent demand, data cleaning and ensembles.
+The Rust crate has more: TBATS, STL and MSTL, intermittent demand, data
+cleaning and ensembles.
 
 ## How it differs from the usual toolkits
 
@@ -91,10 +108,14 @@ overstates its uncertainty.
 | Against | What | Agreement |
 |---|---|---|
 | The Rust crate | backtest of four models on two public series: errors and bias by horizon, quantiles, forecasts, intervals and the choice | the same numbers (relative difference under 10⁻⁹) |
+| The Rust crate | Prophet, KPSS, strength of seasonality | the same numbers (under 10⁻⁸) |
+| The Rust crate | ARIMA, regression with ARIMA errors, ETS: likelihood | the same (under 10⁻⁶) |
+| The Rust crate | ARIMA and ETS forecasts; automatic orders and automatic ETS on three series | forecasts within the precision of the search; the same models chosen |
 | R package `forecast` 9.0.2 | seasonal naive, random walk with drift | exact |
 | R package `forecast` 9.0.2 | Theta | forecasts within 0.1% |
 
-The tests are in `rust_test.go` and `r_test.go`.
+The tests are in `rust_test.go`, `models_test.go` and `r_test.go`. The Rust
+crate is in turn compared with the R packages `forecast` and `prophet`.
 
 ## Data
 
