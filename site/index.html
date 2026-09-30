@@ -125,6 +125,7 @@
   .sub { color: var(--muted); margin: 0 0 30px; max-width: 62ch; }
 
   .grid { display: grid; gap: 18px; }
+  .grid > *, .hero-grid > * { min-width: 0; }
   .grid.f3 { grid-template-columns: repeat(3, 1fr); }
   .grid.f2 { grid-template-columns: repeat(2, 1fr); }
   @media (max-width: 860px) { .grid.f3, .grid.f2 { grid-template-columns: 1fr; } }
