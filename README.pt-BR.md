@@ -60,6 +60,12 @@ semestre, _ := melhor.Cumulative(6)
 Os resultados são conferidos com o crate Rust (mesmos números) e com o pacote
 `forecast` do R em dados públicos.
 
+## Autores
+
+- André Leite ([ORCID](https://orcid.org/0000-0002-4718-9766))
+- Hugo Vasconcelos ([ORCID](https://orcid.org/0000-0001-6249-0920))
+- Raydonal Ospina ([ORCID](https://orcid.org/0000-0002-9884-9090))
+
 ## Licença
 
 MIT. Veja [LICENSE](LICENSE).
