@@ -18,6 +18,7 @@ func column(t testing.TB, file string, i int) []float64 {
 	}
 	var out []float64
 	for _, l := range strings.Split(string(raw), "\n") {
+		l = strings.TrimSpace(l) // a checkout on Windows may end the lines with \r\n
 		if l == "" || strings.HasPrefix(l, "#") || strings.HasPrefix(l, "month") {
 			continue
 		}
